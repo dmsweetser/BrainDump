@@ -1,0 +1,6 @@
+.env
+venv
+ai_builder.log
+__pycache__
+utility.log
+output.txt
