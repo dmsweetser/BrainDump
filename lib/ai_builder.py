@@ -41,51 +41,14 @@ class FileParser:
             for action_block in action_blocks:
                 action_type = action_block.group(1)
                 action_content = action_block.group(2)
-                if action_type == 'create_file':
-                    action = FileParser._parse_create_action(action_content)
-                elif action_type == 'remove_file':
-                    action = {'action': 'remove_file'}
-                elif action_type == 'replace_file':
-                    action = FileParser._parse_replace_file_action(action_content)
-                elif action_type == 'replace_section':
+                if action_type == 'replace_section':
                     action = FileParser._parse_replace_section_action(action_content)
-                else:
-                    continue
-                if action:
-                    actions.append(action)
+                    if action:
+                        actions.append(action)
+                # Ignore other action types
             return actions
         except Exception as e:
             logging.error(f"Error parsing actions: {e}")
-            raise
-
-    @staticmethod
-    def _parse_create_action(content: str) -> Optional[Dict[str, Any]]:
-        try:
-            file_content_pattern = r'\[aibuilder_file_content\](.*?)\[aibuilder_end_file_content\]'
-            file_content_match = re.search(file_content_pattern, content, re.DOTALL)
-            if file_content_match:
-                return {
-                    'action': 'create_file',
-                    'file_content': file_content_match.group(1).strip().split('\n')
-                }
-            return None
-        except Exception as e:
-            logging.error(f"Error parsing create action: {e}")
-            raise
-
-    @staticmethod
-    def _parse_replace_file_action(content: str) -> Optional[Dict[str, Any]]:
-        try:
-            file_content_pattern = r'\[aibuilder_file_content\](.*?)\[aibuilder_end_file_content\]'
-            file_content_match = re.search(file_content_pattern, content, re.DOTALL)
-            if file_content_match:
-                return {
-                    'action': 'replace_file',
-                    'file_content': file_content_match.group(1).strip().split('\n')
-                }
-            return None
-        except Exception as e:
-            logging.error(f"Error parsing replace file action: {e}")
             raise
 
     @staticmethod
@@ -105,6 +68,7 @@ class FileParser:
         except Exception as e:
             logging.error(f"Error parsing replace section action: {e}")
             raise
+
 
 class FileModifier:
     @staticmethod
@@ -142,25 +106,7 @@ class FileModifier:
             action_type = action['action']
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-            if action_type == 'create_file':
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write("\n".join(action['file_content']) + "\n")
-                logging.info(f"Created/Replaced: {filepath}")
-                return True
-            elif action_type == 'remove_file':
-                if os.path.isfile(filepath):
-                    os.remove(filepath)
-                    logging.info(f"Removed: {filepath}")
-                    return True
-                else:
-                    logging.warning(f"File not found: {filepath}")
-                    return False
-            elif action_type == 'replace_file':
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write("\n".join(action['file_content']) + "\n")
-                logging.info(f"Replaced entire content of: {filepath}")
-                return True
-            elif action_type == 'replace_section':
+            if action_type == 'replace_section':
                 return FileModifier._replace_section(filepath, action['original_content'], action['file_content'])
             return False
         except Exception as e:
@@ -186,6 +132,7 @@ class FileModifier:
             logging.error(f"Error replacing section: {e}")
             raise
 
+
 class ActionManager:
     @staticmethod
     def save_actions(actions: List[Dict[str, Any]], filepath: str) -> None:
@@ -194,11 +141,9 @@ class ActionManager:
                 for action in actions:
                     f.write(f"File: {action['file']}\n")
                     f.write(f"Action: {action['action']['action']}\n")
-                    if action['action']['action'] in ['create_file', 'replace_file', 'replace_section']:
-                        f.write("Content:\n")
-                        f.write("\n".join(action['action']['file_content']) + "\n")
-                    if action['action']['action'] == 'replace_section':
-                        f.write(f"Original Content:\n{action['action']['original_content']}\n")
+                    f.write(f"Original Content:\n{action['action']['original_content']}\n")
+                    f.write("Content:\n")
+                    f.write("\n".join(action['action']['file_content']) + "\n")
                     f.write("\n")
             logging.info(f"Saved actions to {filepath}")
         except Exception as e:
@@ -212,26 +157,27 @@ class ActionManager:
             with open(filepath, 'r', encoding='utf-8') as f:
                 content = f.read()
                 action_blocks = re.finditer(
-                    r'File: (.*?)\nAction: (.*?)\n(?:Content:\n(.*?)(?=\nFile:|\Z))?(?:Original Content:\n(.*?)(?=\nFile:|\Z))?',
+                    r'File: (.*?)\nAction: (.*?)\nOriginal Content:\n(.*?)(?=\nContent:|\Z)\nContent:\n(.*?)(?=\nFile:|\Z)',
                     content,
                     re.DOTALL
                 )
                 for block in action_blocks:
                     file = block.group(1)
                     action_type = block.group(2)
-                    file_content = block.group(3).strip().split('\n') if block.group(3) else []
-                    original_content = block.group(4).strip() if block.group(4) else None
-                    action = {'action': action_type}
-                    if action_type in ['create_file', 'replace_file', 'replace_section']:
-                        action['file_content'] = file_content
-                    if action_type == 'replace_section':
-                        action['original_content'] = original_content
+                    original_content = block.group(3).strip()
+                    file_content = block.group(4).strip().split('\n')
+                    action = {
+                        'action': action_type,
+                        'original_content': original_content,
+                        'file_content': file_content
+                    }
                     actions.append({'file': file, 'action': action})
             logging.info(f"Loaded actions from {filepath}")
             return actions
         except Exception as e:
             logging.error(f"Error loading actions: {e}")
             raise
+
 
 class AIBuilder:
     def __init__(self, root_directory: Path):
@@ -283,61 +229,53 @@ class AIBuilder:
             patterns = [p.text for p in config.findall('patterns/pattern')]
 
             prompt = f"""
-Generate a line-delimited format file that describes file modifications to apply using the `create_file`, `remove_file`, `replace_file`, and `replace_section` action types.
-Ensure all content is provided using line-delimited format-compatible entities.
-Focus on small, specific sections of code rather than large blocks.
-Ensure you do not omit any existing code and only modify the sections specified.
-Available operations:
-1. `create_file`:
-    - `file_content`: List of strings (lines of the file content)
-2. `remove_file`:
-    - No additional parameters needed.
-3. `replace_file`:
-    - `file_content`: List of strings (lines of the new file content)
-    - The revision must be entirely complete
-4. `replace_section`:
-    - `original_content`: The original content in the file
-    - `file_content`: List of strings (lines of the new file content to replace the original content)
-Example output format:
-[aibuilder_change file="new_file.py"]
-[aibuilder_action type="create_file"]
-[aibuilder_file_content]
-# Content line 1 with whitespace preserved
-\t# Content line 2 with whitespace preserved
-\t# Content line 3 with whitespace preserved
-[aibuilder_end_file_content]
-[aibuilder_end_action]
-[aibuilder_change file="old_file.py"]
-[aibuilder_action type="remove_file"]
-[aibuilder_end_action]
-[aibuilder_change file="file_to_replace.py"]
-[aibuilder_action type="replace_file"]
-[aibuilder_file_content]
-# New content line 1 with whitespace preserved
-\t# New content line 2 with whitespace preserved
-\t# New content line 3 with whitespace preserved
-[aibuilder_end_file_content]
-[aibuilder_end_action]
-[aibuilder_change file="file_to_modify.py"]
+You are a document revision assistant. You will receive a document and a list of new notes.
+
+Your task: **Only** update the document by replacing **sections** that are outdated or need restructuring based on the new notes.
+
+Rules:
+1. **Never** create new files.
+2. **Never** remove files.
+3. **Never** replace entire files.
+4. **Only** use `replace_section` to update specific sections of the document.
+5. Match the original section content **exactly** (including whitespace and formatting).
+6. Do **not** change any content outside the updated sections.
+7. If a section is not affected, **do not** modify it.
+8. Output **only** the `replace_section` actions in the required format.
+
+Example format:
+[aibuilder_change file="brain_dump.html"]
 [aibuilder_action type="replace_section"]
 [aibuilder_original_content]
-# Original content line 1
-\t# Original content line 2
+<h2>Introduction</h2>
+<p>This is the original intro.</p>
 [aibuilder_end_original_content]
 [aibuilder_file_content]
-# New content line 1 with whitespace preserved
-\t# New content line 2 with whitespace preserved
-\t# New content line 3 with whitespace preserved
+<h2>Introduction</h2>
+<p>This is the updated intro with new context.</p>
+<a href="#new-section">Go to new section</a>
 [aibuilder_end_file_content]
 [aibuilder_end_action]
-Generate modifications logically based on the desired changes.
-Current code:
-{current_code}
-Instructions:
-{instructions}
-Reply ONLY in the specified format with no commentary. THAT'S AN ORDER, SOLDIER!
-"""
+[aibuilder_change file="brain_dump.html"]
+[aibuilder_action type="replace_section"]
+[aibuilder_original_content]
+<h2>Notes</h2>
+<ul><li>Note 1</li><li>Note 2</li></ul>
+[aibuilder_end_original_content]
+[aibuilder_file_content]
+<h2>Notes</h2>
+<ul><li>Note 1</li><li>Note 2</li><li>Note 3 (new)</li></ul>
+[aibuilder_end_file_content]
+[aibuilder_end_action]
 
+Document:
+{current_code}
+
+New Notes:
+{instructions}
+
+Respond **only** in the required format. No commentary. No explanations. No markdown. Just the actions.
+"""
             use_local_model = Config.USE_LOCAL_MODEL
             if use_local_model:
                 model_path = Config.MODEL_PATH

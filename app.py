@@ -14,11 +14,10 @@ from pathlib import Path
 
 import sqlite3
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
-from weasyprint import HTML  # PDF generation
+from weasyprint import HTML
 
-# Import Config & AI Builder
-from config import Config
-from ai_builder import AIBuilder
+from lib.config import Config
+from lib.ai_builder import AIBuilder, FileModifier, FileParser
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -135,6 +134,35 @@ def get_all_notes():
         for note in notes
     ]
 
+# Get latest revision timestamp
+def get_latest_revision_timestamp():
+    conn = sqlite3.connect(Config.DATABASE)
+    cursor = conn.cursor()
+    cursor.execute('SELECT MAX(timestamp) FROM document_history')
+    result = cursor.fetchone()
+    conn.close()
+    return result[0] if result[0] else None
+
+# Get only notes newer than last revision
+def get_new_notes_since_revision():
+    latest_timestamp = get_latest_revision_timestamp()
+    if not latest_timestamp:
+        return get_all_notes()
+    conn = sqlite3.connect(Config.DATABASE)
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT id, title, content, created_at 
+        FROM notes 
+        WHERE created_at > ? 
+        ORDER BY created_at ASC
+    ''', (latest_timestamp,))
+    new_notes = cursor.fetchall()
+    conn.close()
+    return [
+        {'id': note[0], 'title': note[1], 'content': note[2], 'created_at': note[3]}
+        for note in new_notes
+    ]
+
 # Get document history
 def get_document_history():
     conn = sqlite3.connect(Config.DATABASE)
@@ -157,7 +185,6 @@ def get_document_history():
 # Generate diff between two versions
 def generate_diff(old_content: str, new_content: str) -> str:
     from difflib import SequenceMatcher
-    # Simple diff using SequenceMatcher
     s = SequenceMatcher(None, old_content, new_content)
     diff_lines = []
     for tag, i1, i2, j1, j2 in s.get_opcodes():
@@ -169,7 +196,7 @@ def generate_diff(old_content: str, new_content: str) -> str:
             diff_lines.append(f"Removed: {old_content[i1:i2]}")
         elif tag == 'insert':
             diff_lines.append(f"Added: {new_content[j1:j2]}")
-    return "\n".join(diff_lines[:10])  # Limit to 10 changes
+    return "\n".join(diff_lines[:10])
 
 # Regenerate document (run in thread)
 def regenerate_document_worker():
@@ -179,14 +206,34 @@ def regenerate_document_worker():
             if note_id is None:
                 break
 
-            notes = get_all_notes()
-            if not notes:
+            # Get only **new** notes since last revision
+            new_notes = get_new_notes_since_revision()
+            if not new_notes:
+                revision_queue.task_done()
                 continue
 
-            # Generate HTML
-            html_content = generate_html_document(notes)
+            # Get latest document HTML
+            history = get_document_history()
+            latest_html = history[0]['html_content'] if history else ""
 
-            # Get latest version number
+            # Prepare input for AI
+            new_notes_text = "\n".join([
+                f"=== {note['title']} ===\n{note['content']}"
+                for note in new_notes
+            ])
+
+            # Initialize AI Builder
+            root_dir = Path(__file__).parent.resolve()
+            ai_builder = AIBuilder(root_dir)
+
+            # Run AI to get `replace_section` actions
+            response_content = ai_builder.run(current_code=latest_html, instructions=new_notes_text)
+
+            # Parse and apply changes
+            changes = FileParser.parse_custom_format(response_content)
+            incomplete_actions = FileModifier.apply_modifications(changes, dry_run=False)
+
+            # Save to DB
             conn = sqlite3.connect(Config.DATABASE)
             cursor = conn.cursor()
             cursor.execute('SELECT MAX(version_number) FROM document_history')
@@ -194,21 +241,11 @@ def regenerate_document_worker():
             conn.close()
             version_number = (result[0] or 0) + 1
 
-            # Get previous version for diff
-            previous_html = ""
-            if version_number > 1:
-                conn = sqlite3.connect(Config.DATABASE)
-                cursor = conn.cursor()
-                cursor.execute('SELECT html_content FROM document_history WHERE version_number = ?',
-                               (version_number - 1,))
-                result = cursor.fetchone()
-                conn.close()
-                if result:
-                    previous_html = result[0]
+            # Re-generate full HTML
+            full_notes = get_all_notes()
+            html_content = generate_html_document(full_notes)
 
-            diff_content = generate_diff(previous_html, html_content)
-
-            # Save HTML
+            # Save to DB
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             html_filename = f"brain_dump_v{version_number}_{timestamp}.html"
             html_path = os.path.join(Config.HTML_OUTPUT, html_filename)
@@ -224,14 +261,15 @@ def regenerate_document_worker():
                     HTML(string=html_content).write_pdf(pdf_path)
                 except Exception as e:
                     print(f"PDF generation failed: {e}")
-                    # Fallback: empty PDF
                     with open(pdf_path, 'w') as f:
                         f.write("PDF generation failed")
             else:
                 with open(pdf_path, 'w') as f:
                     f.write("PDF generation disabled")
 
-            # Save to DB
+            # Save diff
+            diff_content = generate_diff(latest_html, html_content)
+
             conn = sqlite3.connect(Config.DATABASE)
             cursor = conn.cursor()
             cursor.execute('''
@@ -292,6 +330,7 @@ def send_email_notification(version: int, pdf_path: str, html_path: str):
 # Start revision worker thread
 revision_queue = queue.Queue()
 threading.Thread(target=regenerate_document_worker, daemon=True).start()
+
 
 # Routes (unchanged, but now use updated functions)
 @app.route('/')
