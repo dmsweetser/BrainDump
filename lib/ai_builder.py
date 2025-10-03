@@ -1,13 +1,13 @@
 import os
 import re
 import logging
-import shutil
-import xml.etree.ElementTree as ET
 from typing import List, Dict, Any, Optional
-from pathlib import Path
+
+import xml.etree.ElementTree as ET
 from config import Config
 
-class FileParser:
+
+class StringParser:
     @staticmethod
     def parse_custom_format(content: str) -> List[Dict[str, Any]]:
         try:
@@ -22,7 +22,7 @@ class FileParser:
             )
             for block in change_blocks:
                 file = block.group(1)
-                actions = FileParser._parse_actions(block.group(2))
+                actions = StringParser._parse_actions(block.group(2))
                 changes.append({'file': file, 'actions': actions})
             return changes
         except Exception as e:
@@ -42,7 +42,7 @@ class FileParser:
                 action_type = action_block.group(1)
                 action_content = action_block.group(2)
                 if action_type == 'replace_section':
-                    action = FileParser._parse_replace_section_action(action_content)
+                    action = StringParser._parse_replace_section_action(action_content)
                     if action:
                         actions.append(action)
                 # Ignore other action types
@@ -70,135 +70,73 @@ class FileParser:
             raise
 
 
-class FileModifier:
+class StringModifier:
     @staticmethod
-    def apply_modifications(changes: List[Dict[str, Any]], dry_run: bool = False) -> List[Dict[str, Any]]:
+    def apply_modifications(content: str, changes: List[Dict[str, Any]], dry_run: bool = False) -> str:
+        modified_content = content
         incomplete_actions = []
+
         for change in changes:
-            filepath = change['file']
-            backup_filepath = f"{filepath}.bak"
-            logging.info(f"Processing file: {filepath}")
-            if not dry_run:
-                try:
-                    if os.path.exists(filepath):
-                        shutil.copy2(filepath, backup_filepath)
-                        logging.info(f"Created backup: {backup_filepath}")
-                except Exception as e:
-                    logging.error(f"Could not back up file: {filepath}: {e}")
+            file = change['file']
+            logging.info(f"Processing file: {file}")
+
             for action in change['actions']:
                 try:
                     if dry_run:
-                        logging.info(f"Dry run: Would apply action {action['action']} to {filepath}")
+                        logging.info(f"Dry run: Would apply action {action['action']} to content")
                     else:
-                        if not FileModifier._apply_action(filepath, action):
-                            incomplete_actions.append({'file': filepath, 'action': action})
+                        if not StringModifier._apply_action(modified_content, action):
+                            incomplete_actions.append({'file': file, 'action': action})
                 except Exception as e:
-                    logging.error(f"Error applying modifications to {filepath}: {e}")
-                    incomplete_actions.append({'file': filepath, 'action': action})
-                    if not dry_run and os.path.exists(backup_filepath):
-                        shutil.copy2(backup_filepath, filepath)
-                        logging.info(f"Restored backup for {filepath}")
-        return incomplete_actions
+                    logging.error(f"Error applying modifications: {e}")
+                    incomplete_actions.append({'file': file, 'action': action})
+
+        return modified_content
 
     @staticmethod
-    def _apply_action(filepath: str, action: Dict[str, Any]) -> bool:
+    def _apply_action(content: str, action: Dict[str, Any]) -> bool:
         try:
             action_type = action['action']
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-
             if action_type == 'replace_section':
-                return FileModifier._replace_section(filepath, action['original_content'], action['file_content'])
+                return StringModifier._replace_section(content, action['original_content'], action['file_content'])
             return False
         except Exception as e:
             logging.error(f"Error applying action: {e}")
             raise
 
     @staticmethod
-    def _replace_section(filepath: str, original_content: str, new_content: List[str]) -> bool:
+    def _replace_section(content: str, original_content: str, new_content: List[str]) -> bool:
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
             new_section_str = '\n'.join(new_content)
             if original_content in content:
                 modified_content = content.replace(original_content, new_section_str)
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(modified_content)
-                logging.info(f"Replaced section in: {filepath}")
+                logging.info("Replaced section in content")
                 return True
             else:
-                logging.warning(f"Original content not found in: {filepath}")
+                logging.warning("Original content not found in content")
                 return False
         except Exception as e:
             logging.error(f"Error replacing section: {e}")
             raise
 
 
-class ActionManager:
-    @staticmethod
-    def save_actions(actions: List[Dict[str, Any]], filepath: str) -> None:
-        try:
-            with open(filepath, 'w', encoding='utf-8') as f:
-                for action in actions:
-                    f.write(f"File: {action['file']}\n")
-                    f.write(f"Action: {action['action']['action']}\n")
-                    f.write(f"Original Content:\n{action['action']['original_content']}\n")
-                    f.write("Content:\n")
-                    f.write("\n".join(action['action']['file_content']) + "\n")
-                    f.write("\n")
-            logging.info(f"Saved actions to {filepath}")
-        except Exception as e:
-            logging.error(f"Error saving actions: {e}")
-            raise
-
-    @staticmethod
-    def load_actions(filepath: str) -> List[Dict[str, Any]]:
-        try:
-            actions = []
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
-                action_blocks = re.finditer(
-                    r'File: (.*?)\nAction: (.*?)\nOriginal Content:\n(.*?)(?=\nContent:|\Z)\nContent:\n(.*?)(?=\nFile:|\Z)',
-                    content,
-                    re.DOTALL
-                )
-                for block in action_blocks:
-                    file = block.group(1)
-                    action_type = block.group(2)
-                    original_content = block.group(3).strip()
-                    file_content = block.group(4).strip().split('\n')
-                    action = {
-                        'action': action_type,
-                        'original_content': original_content,
-                        'file_content': file_content
-                    }
-                    actions.append({'file': file, 'action': action})
-            logging.info(f"Loaded actions from {filepath}")
-            return actions
-        except Exception as e:
-            logging.error(f"Error loading actions: {e}")
-            raise
-
-
 class AIBuilder:
-    def __init__(self, root_directory: Path):
-        self.root_directory = root_directory
-        self.ai_builder_dir = Config.get_ai_builder_dir(root_directory)
-        self.response_file = os.path.join(self.ai_builder_dir, "current_response.txt")
-        self.output_file = os.path.join(self.ai_builder_dir, "output.txt")
-        self.actions_file = os.path.join(self.ai_builder_dir, "actions.txt")
-        os.makedirs(self.ai_builder_dir, exist_ok=True)
+    def __init__(self):
+        self.response_file = "current_response.txt"
+        self.output_file = "output.txt"
+        self.actions_file = "actions.txt"
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler(Config.get_log_file_path(root_directory)),
+                logging.FileHandler("utility.log"),
                 logging.StreamHandler()
             ]
         )
 
-    def run(self, current_code: str, instructions: str) -> str:
+    def run(self, current_document: str, instructions: str) -> str:
         try:
-            config_path = os.path.join(self.ai_builder_dir, "user_config.xml")
+            config_path = "user_config.xml"
             if not os.path.exists(config_path):
                 default_config = """<?xml version="1.0" encoding="UTF-8"?>
 <config>
@@ -244,7 +182,7 @@ Rules:
 8. Output **only** the `replace_section` actions in the required format.
 
 Example format:
-[aibuilder_change file="brain_dump.html"]
+[aibuilder_change file="document"]
 [aibuilder_action type="replace_section"]
 [aibuilder_original_content]
 <h2>Introduction</h2>
@@ -256,20 +194,9 @@ Example format:
 <a href="#new-section">Go to new section</a>
 [aibuilder_end_file_content]
 [aibuilder_end_action]
-[aibuilder_change file="brain_dump.html"]
-[aibuilder_action type="replace_section"]
-[aibuilder_original_content]
-<h2>Notes</h2>
-<ul><li>Note 1</li><li>Note 2</li></ul>
-[aibuilder_end_original_content]
-[aibuilder_file_content]
-<h2>Notes</h2>
-<ul><li>Note 1</li><li>Note 2</li><li>Note 3 (new)</li></ul>
-[aibuilder_end_file_content]
-[aibuilder_end_action]
 
 Document:
-{current_code}
+{current_document}
 
 New Notes:
 {instructions}
@@ -331,7 +258,15 @@ Respond **only** in the required format. No commentary. No explanations. No mark
             with open(self.response_file, 'w', encoding='utf-8') as f:
                 f.write(response_content)
 
-            return response_content
+            # Parse the response and apply changes to the document
+            changes = StringParser.parse_custom_format(response_content)
+            modified_document = StringModifier.apply_modifications(current_document, changes, dry_run=False)
+
+            # Save the final output
+            with open(self.output_file, 'w', encoding='utf-8') as f:
+                f.write(modified_document)
+
+            return modified_document
 
         except Exception as e:
             logging.error(f"AI Builder error: {e}", exc_info=True)

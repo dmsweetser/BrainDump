@@ -227,11 +227,7 @@ def regenerate_document_worker():
             ai_builder = AIBuilder(root_dir)
 
             # Run AI to get `replace_section` actions
-            response_content = ai_builder.run(current_code=latest_html, instructions=new_notes_text)
-
-            # Parse and apply changes
-            changes = FileParser.parse_custom_format(response_content)
-            incomplete_actions = FileModifier.apply_modifications(changes, dry_run=False)
+            html_content = ai_builder.run(current_code=latest_html, instructions=new_notes_text)
 
             # Save to DB
             conn = sqlite3.connect(Config.DATABASE)
@@ -240,10 +236,6 @@ def regenerate_document_worker():
             result = cursor.fetchone()
             conn.close()
             version_number = (result[0] or 0) + 1
-
-            # Re-generate full HTML
-            full_notes = get_all_notes()
-            html_content = generate_html_document(full_notes)
 
             # Save to DB
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
