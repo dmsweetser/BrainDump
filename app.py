@@ -1,37 +1,38 @@
-"""
-Brain Dump - A Flask application for managing and organizing notes with LLM-powered structuring
-MIT License - Copyright (c) 2025 Daniel Sweetser
-"""
-
 import os
-import sqlite3
 import hashlib
 import json
-from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
+from datetime import datetime, timedelta
+import threading
+import queue
+import time
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from pathlib import Path
+
+import sqlite3
+from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
+from weasyprint import HTML  # PDF generation
+
+# Import Config & AI Builder
+from config import Config
+from ai_builder import AIBuilder
 
 # Initialize Flask app
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'  # Change this in production
+app.config['SECRET_KEY'] = Config.SECRET_KEY
+app.config['DEBUG'] = Config.DEBUG
 
-# Configuration
-DATABASE = 'brain_dump.db'
-NOTE_DIR = 'notes'
-HTML_OUTPUT = 'output'
-PDF_OUTPUT = 'pdf'
-SYSTEM_PROMPT_FILE = 'system_prompt.txt'
-
-# Create directories if they don't exist
-for directory in [NOTE_DIR, HTML_OUTPUT, PDF_OUTPUT]:
+# Initialize directories
+for directory in [Config.NOTE_DIR, Config.HTML_OUTPUT, Config.PDF_OUTPUT]:
     Path(directory).mkdir(exist_ok=True)
 
 # Initialize database
 def init_db():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
-    
-    # Create notes table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS notes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,8 +42,6 @@ def init_db():
             hash TEXT UNIQUE NOT NULL
         )
     ''')
-    
-    # Create history table for document versions
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS document_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,16 +52,13 @@ def init_db():
             diff_with_previous TEXT
         )
     ''')
-    
-    # Create system prompt table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS system_prompt (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             prompt TEXT NOT NULL
         )
     ''')
-    
-    # Initialize with default system prompt if none exists
+    # Initialize system prompt
     cursor.execute('SELECT COUNT(*) FROM system_prompt')
     if cursor.fetchone()[0] == 0:
         default_prompt = """
@@ -81,90 +77,71 @@ Guidelines:
 10. Use clear and concise language
 """
         cursor.execute('INSERT INTO system_prompt (prompt) VALUES (?)', (default_prompt,))
-    
     conn.commit()
     conn.close()
 
 # Get system prompt
 def get_system_prompt():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     cursor.execute('SELECT prompt FROM system_prompt LIMIT 1')
     result = cursor.fetchone()
     conn.close()
-    
-    if result:
-        return result[0]
-    return ""
+    return result[0] if result else ""
 
 # Save system prompt
 def save_system_prompt(prompt):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     cursor.execute('DELETE FROM system_prompt')
     cursor.execute('INSERT INTO system_prompt (prompt) VALUES (?)', (prompt,))
     conn.commit()
     conn.close()
 
-# Generate note hash for deduplication
+# Generate note hash
 def generate_note_hash(content):
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
-# Save note to database
+# Save note
 def save_note(title, content):
     note_hash = generate_note_hash(content)
-    
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
-    
     try:
         cursor.execute('''
             INSERT INTO notes (title, content, hash)
             VALUES (?, ?, ?)
         ''', (title, content, note_hash))
-        
         note_id = cursor.lastrowid
         conn.commit()
-        
-        # After saving a new note, trigger document regeneration
-        regenerate_document()
-        
+        # Queue document regeneration
+        revision_queue.put(note_id)
         return note_id
     except sqlite3.IntegrityError:
-        # Note with this hash already exists
         conn.rollback()
-        conn.close()
         return None
     finally:
         conn.close()
 
 # Get all notes
 def get_all_notes():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     cursor.execute('SELECT id, title, content, created_at FROM notes ORDER BY created_at DESC')
     notes = cursor.fetchall()
     conn.close()
-    
-    # Convert to list of dictionaries
     return [
-        {
-            'id': note[0],
-            'title': note[1],
-            'content': note[2],
-            'created_at': note[3]
-        }
+        {'id': note[0], 'title': note[1], 'content': note[2], 'created_at': note[3]}
         for note in notes
     ]
 
 # Get document history
 def get_document_history():
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     cursor.execute('SELECT id, version_number, timestamp, html_content, pdf_path, diff_with_previous FROM document_history ORDER BY timestamp DESC')
     history = cursor.fetchall()
     conn.close()
-    
     return [
         {
             'id': item[0],
@@ -177,325 +154,179 @@ def get_document_history():
         for item in history
     ]
 
-# Regenerate the document using the LLM (stub function)
-def regenerate_document():
-    # This is where you would call your LLM API
-    # For now, we'll create a simple placeholder implementation
-    notes = get_all_notes()
-    
-    if not notes:
-        return
-    
-    # Create a simple HTML document with a table of contents
-    # In a real implementation, this would be generated by your LLM
-    html_content = generate_html_document(notes)
-    
-    # Get the latest version number
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT MAX(version_number) FROM document_history')
-    result = cursor.fetchone()
-    conn.close()
-    
-    version_number = (result[0] or 0) + 1
-    
-    # Generate a diff with the previous version if it exists
-    diff_content = ""
-    if version_number > 1:
-        # For now, just create a simple diff placeholder
-        diff_content = f"Version {version_number} includes new notes and structural updates."
-    
-    # Save to database
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
-    
-    # Generate a unique filename for this version
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    pdf_filename = f"brain_dump_v{version_number}_{timestamp}.pdf"
-    pdf_path = os.path.join(PDF_OUTPUT, pdf_filename)
-    
-    # Save HTML content
-    html_filename = f"brain_dump_v{version_number}_{timestamp}.html"
-    html_path = os.path.join(HTML_OUTPUT, html_filename)
-    
-    # Write HTML file
-    with open(html_path, 'w', encoding='utf-8') as f:
-        f.write(html_content)
-    
-    # Save to database
-    cursor.execute('''
-        INSERT INTO document_history (version_number, html_content, pdf_path, diff_with_previous)
-        VALUES (?, ?, ?, ?)
-    ''', (version_number, html_content, pdf_path, diff_content))
-    
-    conn.commit()
-    conn.close()
-    
-    # Generate PDF (stub - in a real implementation, use weasyprint or similar)
-    generate_pdf(html_path, pdf_path)
+# Generate diff between two versions
+def generate_diff(old_content: str, new_content: str) -> str:
+    from difflib import SequenceMatcher
+    # Simple diff using SequenceMatcher
+    s = SequenceMatcher(None, old_content, new_content)
+    diff_lines = []
+    for tag, i1, i2, j1, j2 in s.get_opcodes():
+        if tag == 'equal':
+            continue
+        elif tag == 'replace':
+            diff_lines.append(f"Changed: {new_content[j1:j2]}")
+        elif tag == 'delete':
+            diff_lines.append(f"Removed: {old_content[i1:i2]}")
+        elif tag == 'insert':
+            diff_lines.append(f"Added: {new_content[j1:j2]}")
+    return "\n".join(diff_lines[:10])  # Limit to 10 changes
 
-# Generate HTML document from notes (stub function)
-def generate_html_document(notes):
-    # In a real implementation, this would be generated by your LLM
-    # For now, we'll create a simple HTML document
-    
-    # Create a simple table of contents
-    toc_items = []
-    for i, note in enumerate(notes):
-        # Use the first few words of the title as the TOC entry
-        title = note['title']
-        if len(title) > 30:
-            title = title[:27] + "..."
-        
-        # Create a unique ID for the section
-        section_id = f"note-{i+1}"
-        toc_items.append(f'<li><a href="#{section_id}">{title}</a></li>')
-    
-    # Create the HTML content
-    html_content = f"""
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Brain Dump - Organized Notes</title>
-    <style>
-        body {{
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }}
-        header {{
-            text-align: center;
-            margin-bottom: 40px;
-            border-bottom: 1px solid #eee;
-            padding-bottom: 20px;
-        }}
-        h1 {{
-            color: #2c3e50;
-        }}
-        .toc {{
-            background-color: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 30px;
-        }}
-        .toc h2 {{
-            margin-top: 0;
-            color: #3498db;
-            border-bottom: 1px solid #ddd;
-            padding-bottom: 10px;
-        }}
-        .toc ul {{
-            list-style-type: none;
-            padding-left: 0;
-        }}
-        .toc li {{
-            margin-bottom: 8px;
-        }}
-        .toc a {{
-            color: #3498db;
-            text-decoration: none;
-            transition: color 0.3s;
-        }}
-        .toc a:hover {{
-            color: #2980b9;
-            text-decoration: underline;
-        }}
-        .note {{
-            margin-bottom: 40px;
-            padding: 20px;
-            background-color: #ffffff;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }}
-        .note h2 {{
-            margin-top: 0;
-            color: #2c3e50;
-            border-bottom: 1px solid #eee;
-            padding-bottom: 10px;
-        }}
-        .note .content {{
-            margin-top: 15px;
-        }}
-        .note .metadata {{
-            font-size: 0.8em;
-            color: #666;
-            margin-top: 10px;
-        }}
-        footer {{
-            text-align: center;
-            margin-top: 60px;
-            padding-top: 20px;
-            border-top: 1px solid #eee;
-            color: #999;
-            font-size: 0.9em;
-        }}
-        .diff {{
-            background-color: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 4px;
-            padding: 10px;
-            margin: 15px 0;
-            font-size: 0.9em;
-        }}
-        .diff strong {{
-            color: #856404;
-        }}
-    </style>
-</head>
-<body>
-    <header>
-        <h1>Brain Dump - Organized Notes</h1>
-        <p>Automatically generated from your raw notes using AI</p>
-    </header>
-    
-    <div class="toc">
-        <h2>Table of Contents</h2>
-        <ul>
-            {"".join(toc_items)}
-        </ul>
-    </div>
-    
-    <div class="diff">
-        <strong>Version {get_latest_version_number()}</strong>: 
-        This document was automatically generated from {len(notes)} notes.
-    </div>
-    
-    {"".join(generate_note_html(note, i+1) for i, note in enumerate(notes))}
-    
-    <footer>
-        <p>Brain Dump - MIT License (c) 2025 Daniel Sweetser</p>
-        <p>Generated on {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
-    </footer>
-</body>
-</html>
-    """
-    
-    return html_content
+# Regenerate document (run in thread)
+def regenerate_document_worker():
+    while True:
+        try:
+            note_id = revision_queue.get(timeout=1)
+            if note_id is None:
+                break
 
-# Generate HTML for a single note
-def generate_note_html(note, index):
-    # Use the first 100 characters of the content as preview
-    preview = note['content'][:100]
-    if len(note['content']) > 100:
-        preview += "..."
-    
-    # Create a unique ID for this note
-    section_id = f"note-{index}"
-    
-    # Use markdown for code blocks
-    content_html = note['content']
-    
-    # Simple markdown processing for code blocks
-    content_html = content_html.replace('```', '<pre><code>')
-    content_html = content_html.replace('```', '</code></pre>')
-    
-    return f"""
-    <div class="note" id="{section_id}">
-        <h2>{note['title']}</h2>
-        <div class="content">
-            {content_html}
-        </div>
-        <div class="metadata">
-            Added on {note['created_at']} | Note {index}
-        </div>
-    </div>
-    """
+            notes = get_all_notes()
+            if not notes:
+                continue
 
-# Get the latest version number
-def get_latest_version_number():
-    conn = sqlite3.connect(DATABASE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT MAX(version_number) FROM document_history')
-    result = cursor.fetchone()
-    conn.close()
-    
-    return result[0] or 0
+            # Generate HTML
+            html_content = generate_html_document(notes)
 
-# Generate PDF from HTML (stub function)
-def generate_pdf(html_path, pdf_path):
-    # In a real implementation, you would use a library like weasyprint
-    # For now, we'll just create an empty PDF file
-    # This is a placeholder - you would need to implement actual PDF generation
+            # Get latest version number
+            conn = sqlite3.connect(Config.DATABASE)
+            cursor = conn.cursor()
+            cursor.execute('SELECT MAX(version_number) FROM document_history')
+            result = cursor.fetchone()
+            conn.close()
+            version_number = (result[0] or 0) + 1
+
+            # Get previous version for diff
+            previous_html = ""
+            if version_number > 1:
+                conn = sqlite3.connect(Config.DATABASE)
+                cursor = conn.cursor()
+                cursor.execute('SELECT html_content FROM document_history WHERE version_number = ?',
+                               (version_number - 1,))
+                result = cursor.fetchone()
+                conn.close()
+                if result:
+                    previous_html = result[0]
+
+            diff_content = generate_diff(previous_html, html_content)
+
+            # Save HTML
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            html_filename = f"brain_dump_v{version_number}_{timestamp}.html"
+            html_path = os.path.join(Config.HTML_OUTPUT, html_filename)
+
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+
+            # Generate PDF
+            pdf_filename = f"brain_dump_v{version_number}_{timestamp}.pdf"
+            pdf_path = os.path.join(Config.PDF_OUTPUT, pdf_filename)
+            if Config.WEASYPRINT_ENABLED:
+                try:
+                    HTML(string=html_content).write_pdf(pdf_path)
+                except Exception as e:
+                    print(f"PDF generation failed: {e}")
+                    # Fallback: empty PDF
+                    with open(pdf_path, 'w') as f:
+                        f.write("PDF generation failed")
+            else:
+                with open(pdf_path, 'w') as f:
+                    f.write("PDF generation disabled")
+
+            # Save to DB
+            conn = sqlite3.connect(Config.DATABASE)
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO document_history (version_number, html_content, pdf_path, diff_with_previous)
+                VALUES (?, ?, ?, ?)
+            ''', (version_number, html_content, pdf_path, diff_content))
+            conn.commit()
+            conn.close()
+
+            # Email new version
+            if Config.EMAIL_SENDER and Config.EMAIL_RECIPIENTS:
+                send_email_notification(version_number, pdf_path, html_path)
+
+            revision_queue.task_done()
+
+        except queue.Empty:
+            continue
+        except Exception as e:
+            print(f"Error in regeneration worker: {e}")
+
+# Send email notification
+def send_email_notification(version: int, pdf_path: str, html_path: str):
     try:
-        # This is a placeholder. In a real implementation, you would use:
-        # from weasyprint import HTML
-        # HTML(html_path).write_pdf(pdf_path)
-        pass
-    except Exception as e:
-        print(f"Error generating PDF: {e}")
-        # Create an empty PDF file as fallback
-        with open(pdf_path, 'w') as f:
-            f.write("PDF generation failed - this is a placeholder")
+        msg = MIMEMultipart()
+        msg['From'] = Config.EMAIL_SENDER
+        msg['To'] = ', '.join(Config.EMAIL_RECIPIENTS)
+        msg['Subject'] = f"Brain Dump - New Document Version {version}"
 
-# Routes
+        body = f"New document version {version} has been generated."
+        msg.attach(MIMEText(body, 'plain'))
+
+        # Attach PDF
+        with open(pdf_path, "rb") as attachment:
+            part = MIMEBase('application', 'octet-stream')
+            part.set_payload(attachment.read())
+        encoders.encode_base64(part)
+        part.add_header(
+            'Content-Disposition',
+            f'attachment; filename={os.path.basename(pdf_path)}'
+        )
+        msg.attach(part)
+
+        # Attach HTML (optional)
+        with open(html_path, "r", encoding="utf-8") as f:
+            html_body = f.read()
+        html_part = MIMEText(html_body, 'html')
+        msg.attach(html_part)
+
+        server = smtplib.SMTP(Config.SMTP_SERVER, Config.SMTP_PORT)
+        server.starttls()
+        server.login(Config.SMTP_USERNAME, Config.SMTP_PASSWORD)
+        server.sendmail(Config.EMAIL_SENDER, Config.EMAIL_RECIPIENTS, msg.as_string())
+        server.quit()
+        print(f"Email sent for version {version}")
+    except Exception as e:
+        print(f"Email failed: {e}")
+
+# Start revision worker thread
+revision_queue = queue.Queue()
+threading.Thread(target=regenerate_document_worker, daemon=True).start()
+
+# Routes (unchanged, but now use updated functions)
 @app.route('/')
 def index():
     notes = get_all_notes()
     history = get_document_history()
-    
-    # Get the latest document version
-    latest_version = None
-    if history:
-        latest_version = history[0]
-    
-    # Get system prompt
+    latest_version = history[0] if history else None
     system_prompt = get_system_prompt()
-    
-    return render_template('index.html', 
-                         notes=notes, 
-                         history=history, 
-                         latest_version=latest_version,
-                         system_prompt=system_prompt)
+    return render_template('index.html', notes=notes, history=history, latest_version=latest_version, system_prompt=system_prompt)
 
 @app.route('/add_note', methods=['POST'])
 def add_note():
     title = request.form.get('title', '').strip()
     content = request.form.get('content', '').strip()
-    
     if not title or not content:
         return jsonify({'error': 'Title and content are required'}), 400
-    
     note_id = save_note(title, content)
-    
     if note_id is None:
         return jsonify({'error': 'Note with this content already exists'}), 400
-    
     return jsonify({'success': True, 'message': 'Note added successfully', 'note_id': note_id})
 
 @app.route('/delete_note/<int:note_id>', methods=['POST'])
 def delete_note(note_id):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
-    
     try:
-        # First, get the note to delete
         cursor.execute('SELECT content FROM notes WHERE id = ?', (note_id,))
-        result = cursor.fetchone()
-        
-        if not result:
-            conn.close()
+        if not cursor.fetchone():
             return jsonify({'error': 'Note not found'}), 404
-        
-        # Delete the note
         cursor.execute('DELETE FROM notes WHERE id = ?', (note_id,))
-        
-        # If any notes were deleted
         if cursor.rowcount > 0:
-            # After deleting a note, trigger document regeneration
-            regenerate_document()
+            revision_queue.put(note_id)
             conn.commit()
             return jsonify({'success': True, 'message': 'Note deleted successfully'})
-        else:
-            conn.rollback()
-            return jsonify({'error': 'Note not found'}), 404
-            
+        return jsonify({'error': 'Note not found'}), 404
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -506,33 +337,18 @@ def delete_note(note_id):
 def edit_note(note_id):
     title = request.form.get('title', '').strip()
     content = request.form.get('content', '').strip()
-    
     if not title or not content:
         return jsonify({'error': 'Title and content are required'}), 400
-    
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
-    
     try:
-        # Check if note exists
         cursor.execute('SELECT id FROM notes WHERE id = ?', (note_id,))
         if not cursor.fetchone():
-            conn.close()
             return jsonify({'error': 'Note not found'}), 404
-        
-        # Update the note
-        cursor.execute('''
-            UPDATE notes 
-            SET title = ?, content = ? 
-            WHERE id = ?
-        ''', (title, content, note_id))
-        
-        # After updating, trigger document regeneration
-        regenerate_document()
+        cursor.execute('UPDATE notes SET title = ?, content = ? WHERE id = ?', (title, content, note_id))
+        revision_queue.put(note_id)
         conn.commit()
-        
         return jsonify({'success': True, 'message': 'Note updated successfully'})
-        
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -542,94 +358,61 @@ def edit_note(note_id):
 @app.route('/system_prompt', methods=['POST'])
 def update_system_prompt():
     prompt = request.form.get('prompt', '').strip()
-    
     if not prompt:
         return jsonify({'error': 'System prompt cannot be empty'}), 400
-    
     save_system_prompt(prompt)
-    
     return jsonify({'success': True, 'message': 'System prompt updated successfully'})
 
 @app.route('/export_html/<int:version_id>')
 def export_html(version_id):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     cursor.execute('SELECT html_content, timestamp FROM document_history WHERE id = ?', (version_id,))
     result = cursor.fetchone()
     conn.close()
-    
     if not result:
         return jsonify({'error': 'Version not found'}), 404
-    
     html_content, timestamp = result
-    
-    # Create a filename with timestamp
     filename = f"brain_dump_v{version_id}_{timestamp}.html"
-    
-    # Return the HTML content as a downloadable file
-    return jsonify({
-        'success': True,
-        'filename': filename,
-        'content': html_content
-    })
+    return jsonify({'success': True, 'filename': filename, 'content': html_content})
 
 @app.route('/export_pdf/<int:version_id>')
 def export_pdf(version_id):
-    conn = sqlite3.connect(DATABASE)
+    conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     cursor.execute('SELECT pdf_path FROM document_history WHERE id = ?', (version_id,))
     result = cursor.fetchone()
     conn.close()
-    
     if not result:
         return jsonify({'error': 'Version not found'}), 404
-    
     pdf_path = result[0]
-    
-    # Check if the PDF file exists
     if not os.path.exists(pdf_path):
         return jsonify({'error': 'PDF file not found'}), 404
-    
-    # Return the PDF file for download
     return send_file(pdf_path, as_attachment=True)
 
 @app.route('/export_all_notes')
 def export_all_notes():
     notes = get_all_notes()
-    
-    # Create a simple text file with all notes
     content = ""
     for note in notes:
         content += f"=== {note['title']} ===\n"
         content += f"Added: {note['created_at']}\n"
         content += f"{note['content']}\n\n"
-    
     filename = f"all_notes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
-    
-    return jsonify({
-        'success': True,
-        'filename': filename,
-        'content': content
-    })
+    return jsonify({'success': True, 'filename': filename, 'content': content})
 
 @app.route('/api/notes')
 def api_notes():
-    notes = get_all_notes()
-    return jsonify(notes)
+    return jsonify(get_all_notes())
 
 @app.route('/api/history')
 def api_history():
-    history = get_document_history()
-    return jsonify(history)
+    return jsonify(get_document_history())
 
 @app.route('/api/system_prompt')
 def api_system_prompt():
-    prompt = get_system_prompt()
-    return jsonify({'prompt': prompt})
+    return jsonify({'prompt': get_system_prompt()})
 
 if __name__ == '__main__':
-    # Initialize the database
     init_db()
-    
-    # Run the Flask app
-    app.run(debug=True)
+    app.run(debug=Config.DEBUG)
