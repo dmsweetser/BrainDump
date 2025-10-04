@@ -243,7 +243,7 @@
                             <li>Notes are automatically organized and structured by the AI</li>
                             <li>Every new note triggers a document update with version history</li>
                             <li>View the latest organized document and compare with previous versions</li>
-                            <li>Export as HTML, PDF, or all notes as text</li>
+                            <li>Export as HTML, or all notes as text</li>
                         </ul>
                     </div>
                 </div>
@@ -263,9 +263,6 @@
                         <div class="mb-3">
                             <button class="btn btn-success me-2" onclick="exportDocument('html')">
                                 <i class="bi bi-file-earmark-code me-2"></i> Export as HTML
-                            </button>
-                            <button class="btn btn-danger" onclick="exportDocument('pdf')">
-                                <i class="bi bi-file-earmark-pdf me-2"></i> Export as PDF
                             </button>
                             {% if latest_version.diff_with_previous %}
                             <button class="btn btn-info" onclick="showDiffModal()">
@@ -365,10 +362,6 @@
                                             onclick="exportVersion('html', {{ item.id }})">
                                             <i class="bi bi-file-earmark-code me-2"></i> Export HTML
                                         </button>
-                                        <button class="btn btn-sm btn-danger"
-                                            onclick="exportVersion('pdf', {{ item.id }})">
-                                            <i class="bi bi-file-earmark-pdf me-2"></i> Export PDF
-                                        </button>
                                     </div>
                                 </div>
                             </div>
@@ -398,11 +391,6 @@
                             <div class="col-md-4 mb-3">
                                 <button class="btn btn-outline-success w-100" onclick="exportDocument('html')">
                                     <i class="bi bi-file-earmark-code me-2"></i> Export Latest as HTML
-                                </button>
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <button class="btn btn-outline-danger w-100" onclick="exportDocument('pdf')">
-                                    <i class="bi bi-file-earmark-pdf me-2"></i> Export Latest as PDF
                                 </button>
                             </div>
                         </div>
@@ -555,34 +543,6 @@
                         console.error('Error:', error);
                         alert('An error occurred while exporting the document.');
                     });
-            } else if (format === 'pdf') {
-                fetch(`/export_pdf/${latestVersion}`)
-                    .then(response => {
-                        if (response.ok) {
-                            const contentDisposition = response.headers.get('Content-Disposition');
-                            let filename = 'brain_dump.pdf';
-                            if (contentDisposition) {
-                                const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-                                if (filenameMatch) {
-                                    filename = filenameMatch[1];
-                                }
-                            }
-                            return response.blob().then(blob => {
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = filename;
-                                a.click();
-                                URL.revokeObjectURL(url);
-                            });
-                        } else {
-                            alert('Error: PDF not found');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        alert('An error occurred while exporting the PDF.');
-                    });
             }
         };
 
@@ -608,34 +568,6 @@
                     .catch(error => {
                         console.error('Error:', error);
                         alert('An error occurred while exporting the document.');
-                    });
-            } else if (format === 'pdf') {
-                fetch(`/export_pdf/${versionId}`)
-                    .then(response => {
-                        if (response.ok) {
-                            const contentDisposition = response.headers.get('Content-Disposition');
-                            let filename = 'brain_dump.pdf';
-                            if (contentDisposition) {
-                                const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-                                if (filenameMatch) {
-                                    filename = filenameMatch[1];
-                                }
-                            }
-                            return response.blob().then(blob => {
-                                const url = URL.createObjectURL(blob);
-                                const a = document.createElement('a');
-                                a.href = url;
-                                a.download = filename;
-                                a.click();
-                                URL.revokeObjectURL(url);
-                            });
-                        } else {
-                            alert('Error: PDF not found');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        alert('An error occurred while exporting the PDF.');
                     });
             }
         }

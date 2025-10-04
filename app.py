@@ -27,7 +27,7 @@ app.config['SECRET_KEY'] = Config.SECRET_KEY
 app.config['DEBUG'] = Config.DEBUG
 
 # Initialize directories
-for directory in [Config.HTML_OUTPUT, Config.PDF_OUTPUT]:
+for directory in [Config.HTML_OUTPUT]:
     Path(directory).mkdir(exist_ok=True)
 
 # Initialize database
@@ -49,7 +49,6 @@ def init_db():
             version_number INTEGER NOT NULL,
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             html_content TEXT NOT NULL,
-            pdf_path TEXT,
             diff_with_previous TEXT
         )
     ''')
@@ -169,7 +168,7 @@ def get_new_notes_since_revision():
 def get_document_history():
     conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
-    cursor.execute('SELECT id, version_number, timestamp, html_content, pdf_path, diff_with_previous FROM document_history ORDER BY timestamp DESC')
+    cursor.execute('SELECT id, version_number, timestamp, html_content, diff_with_previous FROM document_history ORDER BY timestamp DESC')
     history = cursor.fetchall()
     conn.close()
     return [
@@ -178,7 +177,6 @@ def get_document_history():
             'version_number': item[1],
             'timestamp': item[2],
             'html_content': item[3],
-            'pdf_path': item[4],
             'diff_with_previous': item[5]
         }
         for item in history
@@ -246,27 +244,9 @@ def regenerate_document_worker():
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
 
-            # Generate PDF
-            pdf_filename = f"brain_dump_v{version_number}_{timestamp}.pdf"
-            pdf_path = os.path.join(Config.PDF_OUTPUT, pdf_filename)
-            with open(pdf_path, 'w') as f:
-                f.write("PDF generation disabled")
-
-            # Save diff
-            diff_content = generate_diff(latest_html, html_content)
-
-            conn = sqlite3.connect(Config.DATABASE)
-            cursor = conn.cursor()
-            cursor.execute('''
-                INSERT INTO document_history (version_number, html_content, pdf_path, diff_with_previous)
-                VALUES (?, ?, ?, ?)
-            ''', (version_number, html_content, pdf_path, diff_content))
-            conn.commit()
-            conn.close()
-
             # Email new version
             if Config.SMTP_ENABLED and Config.EMAIL_SENDER and Config.EMAIL_RECIPIENTS:
-                send_email_notification(version_number, pdf_path, html_path)
+                send_email_notification(version_number, html_path)
 
             revision_queue.task_done()
 
@@ -276,7 +256,7 @@ def regenerate_document_worker():
             print(f"Error in regeneration worker: {e}")
 
 # Send email notification
-def send_email_notification(version: int, pdf_path: str, html_path: str):
+def send_email_notification(version: int, html_path: str):
     try:
         msg = MIMEMultipart()
         msg['From'] = Config.EMAIL_SENDER
@@ -285,17 +265,6 @@ def send_email_notification(version: int, pdf_path: str, html_path: str):
 
         body = f"New document version {version} has been generated."
         msg.attach(MIMEText(body, 'plain'))
-
-        # Attach PDF
-        with open(pdf_path, "rb") as attachment:
-            part = MIMEBase('application', 'octet-stream')
-            part.set_payload(attachment.read())
-        encoders.encode_base64(part)
-        part.add_header(
-            'Content-Disposition',
-            f'attachment; filename={os.path.basename(pdf_path)}'
-        )
-        msg.attach(part)
 
         # Attach HTML (optional)
         with open(html_path, "r", encoding="utf-8") as f:
@@ -399,20 +368,6 @@ def export_html(version_id):
     html_content, timestamp = result
     filename = f"brain_dump_v{version_id}_{timestamp}.html"
     return jsonify({'success': True, 'filename': filename, 'content': html_content})
-
-@app.route('/export_pdf/<int:version_id>')
-def export_pdf(version_id):
-    conn = sqlite3.connect(Config.DATABASE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT pdf_path FROM document_history WHERE id = ?', (version_id,))
-    result = cursor.fetchone()
-    conn.close()
-    if not result:
-        return jsonify({'error': 'Version not found'}), 404
-    pdf_path = result[0]
-    if not os.path.exists(pdf_path):
-        return jsonify({'error': 'PDF file not found'}), 404
-    return send_file(pdf_path, as_attachment=True)
 
 @app.route('/export_all_notes')
 def export_all_notes():
