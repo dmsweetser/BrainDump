@@ -8,3 +8,7 @@ output/*
 *.db
 pdf/*
 current_response.txt
+instructions.txt
+pre.ps1
+post.ps1
+user_config.xml
