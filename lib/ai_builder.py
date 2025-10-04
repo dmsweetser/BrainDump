@@ -103,10 +103,12 @@ class StringModifier:
     def _replace_section(content: str, original_content: str, new_content: List[str]) -> bool:
         try:
             new_section_str = '\n'.join(new_content)
-            if original_content in content or content == '':
+            if original_content in content:
                 modified_content = content.replace(original_content, new_section_str)
                 logging.info("Replaced section in content")
                 return modified_content
+            elif content == '':
+                return new_section_str
             else:
                 logging.warning("Original content not found in content")
                 return content
