@@ -32,7 +32,7 @@ class Config:
     CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", 4096))
 
     # Email
-    SMTP_ENABLED = os.getenv("SMTP_ENABLED")
+    SMTP_ENABLED = os.getenv("SMTP_ENABLED", "False").lower() == "true"
     SMTP_SERVER = os.getenv("SMTP_SERVER")
     SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
     SMTP_USERNAME = os.getenv("SMTP_USERNAME")
