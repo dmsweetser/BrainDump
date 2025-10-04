@@ -2,3 +2,4 @@ flask
 weasyprint
 llama-cpp-python
 azure-ai-inference
+python-dotenv

@@ -4,7 +4,7 @@ import logging
 from typing import List, Dict, Any, Optional
 
 import xml.etree.ElementTree as ET
-from config import Config
+from lib.config import Config
 
 
 class StringParser:
@@ -136,36 +136,6 @@ class AIBuilder:
 
     def run(self, current_document: str, instructions: str) -> str:
         try:
-            config_path = "user_config.xml"
-            if not os.path.exists(config_path):
-                default_config = """<?xml version="1.0" encoding="UTF-8"?>
-<config>
-    <iterations>1</iterations>
-    <mode>exclude</mode>
-    <patterns>
-        <pattern>package-lock.json</pattern>
-        <pattern>output.txt</pattern>
-        <pattern>full_request.txt</pattern>
-        <pattern>full_response.txt</pattern>
-        <pattern>instructions.txt</pattern>
-        <pattern>changes.patch</pattern>
-        <pattern>.git</pattern>
-        <pattern>utility.log</pattern>
-        <pattern>.png</pattern>
-        <pattern>.exe</pattern>
-        <pattern>.ico</pattern>
-        <pattern>.webp</pattern>
-        <pattern>.gguf</pattern>
-    </patterns>
-</config>"""
-                with open(config_path, 'w', encoding='utf-8') as f:
-                    f.write(default_config)
-                logging.warning("Created default user_config.xml")
-
-            config = ET.parse(config_path).getroot()
-            mode = config.find('mode').text
-            patterns = [p.text for p in config.findall('patterns/pattern')]
-
             prompt = f"""
 You are a document revision assistant. You will receive a document and a list of new notes.
 

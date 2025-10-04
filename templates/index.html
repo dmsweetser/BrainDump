@@ -277,9 +277,6 @@
                             {{ latest_version.html_content | safe }}
                         </div>
                         {% endif %}
-                        {% else %}
-                        <p class="text-muted">No notes yet. Add your first note to get started!</p>
-                        {% endif %}
                     </div>
                 </div>
             </div>
@@ -531,63 +528,64 @@
 
         // Export document
         function exportDocument(format) {
-            const latestVersion = {{ latest_version.id if latest_version else 'null' }
-        };
-        if (!latestVersion) {
-            alert('No document to export yet.');
-            return;
-        }
+            const latestVersion = {{ latest_version.id if latest_version else 'null' }}
 
-        if (format === 'html') {
-            fetch(`/export_html/${latestVersion}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const blob = new Blob([data.content], { type: 'text/html' });
-                        const url = URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = data.filename;
-                        a.click();
-                        URL.revokeObjectURL(url);
-                    } else {
-                        alert('Error: ' + data.error);
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('An error occurred while exporting the document.');
-                });
-        } else if (format === 'pdf') {
-            fetch(`/export_pdf/${latestVersion}`)
-                .then(response => {
-                    if (response.ok) {
-                        const contentDisposition = response.headers.get('Content-Disposition');
-                        let filename = 'brain_dump.pdf';
-                        if (contentDisposition) {
-                            const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
-                            if (filenameMatch) {
-                                filename = filenameMatch[1];
-                            }
-                        }
-                        return response.blob().then(blob => {
+            if (!latestVersion) {
+                alert('No document to export yet.');
+                return;
+            }
+            
+            if (format === 'html') {
+                fetch(`/export_html/${latestVersion}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            const blob = new Blob([data.content], { type: 'text/html' });
                             const url = URL.createObjectURL(blob);
                             const a = document.createElement('a');
                             a.href = url;
-                            a.download = filename;
+                            a.download = data.filename;
                             a.click();
                             URL.revokeObjectURL(url);
-                        });
-                    } else {
-                        alert('Error: PDF not found');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('An error occurred while exporting the PDF.');
-                });
-        }
-        }
+                        } else {
+                            alert('Error: ' + data.error);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred while exporting the document.');
+                    });
+            } else if (format === 'pdf') {
+                fetch(`/export_pdf/${latestVersion}`)
+                    .then(response => {
+                        if (response.ok) {
+                            const contentDisposition = response.headers.get('Content-Disposition');
+                            let filename = 'brain_dump.pdf';
+                            if (contentDisposition) {
+                                const filenameMatch = contentDisposition.match(/filename="?(.+)"?/);
+                                if (filenameMatch) {
+                                    filename = filenameMatch[1];
+                                }
+                            }
+                            return response.blob().then(blob => {
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = filename;
+                                a.click();
+                                URL.revokeObjectURL(url);
+                            });
+                        } else {
+                            alert('Error: PDF not found');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('An error occurred while exporting the PDF.');
+                    });
+            }
+        };
+
 
         // Export version
         function exportVersion(format, versionId) {

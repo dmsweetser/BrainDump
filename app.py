@@ -13,11 +13,13 @@ from email import encoders
 from pathlib import Path
 
 import sqlite3
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
-from weasyprint import HTML
 
 from lib.config import Config
-from lib.ai_builder import AIBuilder, FileModifier, FileParser
+from lib.ai_builder import AIBuilder
+
+load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -223,11 +225,10 @@ def regenerate_document_worker():
             ])
 
             # Initialize AI Builder
-            root_dir = Path(__file__).parent.resolve()
-            ai_builder = AIBuilder(root_dir)
+            ai_builder = AIBuilder()
 
             # Run AI to get `replace_section` actions
-            html_content = ai_builder.run(current_code=latest_html, instructions=new_notes_text)
+            html_content = ai_builder.run(current_document=latest_html, instructions=new_notes_text)
 
             # Save to DB
             conn = sqlite3.connect(Config.DATABASE)
@@ -248,16 +249,8 @@ def regenerate_document_worker():
             # Generate PDF
             pdf_filename = f"brain_dump_v{version_number}_{timestamp}.pdf"
             pdf_path = os.path.join(Config.PDF_OUTPUT, pdf_filename)
-            if Config.WEASYPRINT_ENABLED:
-                try:
-                    HTML(string=html_content).write_pdf(pdf_path)
-                except Exception as e:
-                    print(f"PDF generation failed: {e}")
-                    with open(pdf_path, 'w') as f:
-                        f.write("PDF generation failed")
-            else:
-                with open(pdf_path, 'w') as f:
-                    f.write("PDF generation disabled")
+            with open(pdf_path, 'w') as f:
+                f.write("PDF generation disabled")
 
             # Save diff
             diff_content = generate_diff(latest_html, html_content)
@@ -272,7 +265,7 @@ def regenerate_document_worker():
             conn.close()
 
             # Email new version
-            if Config.EMAIL_SENDER and Config.EMAIL_RECIPIENTS:
+            if Config.SMTP_ENABLED and Config.EMAIL_SENDER and Config.EMAIL_RECIPIENTS:
                 send_email_notification(version_number, pdf_path, html_path)
 
             revision_queue.task_done()
@@ -446,4 +439,4 @@ def api_system_prompt():
 
 if __name__ == '__main__':
     init_db()
-    app.run(debug=Config.DEBUG)
+    app.run(host="0.0.0.0", port="5983", debug=Config.DEBUG)

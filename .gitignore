@@ -6,3 +6,5 @@ utility.log
 output.txt
 output/*
 *.db
+pdf/*
+current_response.txt

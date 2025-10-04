@@ -1,7 +1,12 @@
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 class Config:
+    
+    load_dotenv()
+    
     # App Settings
     SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret-key")
     DEBUG = os.getenv("DEBUG", "False").lower() == "true"
@@ -27,6 +32,7 @@ class Config:
     CONTEXT_SIZE = int(os.getenv("CONTEXT_SIZE", 4096))
 
     # Email
+    SMTP_ENABLED = os.getenv("SMTP_ENABLED")
     SMTP_SERVER = os.getenv("SMTP_SERVER")
     SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
     SMTP_USERNAME = os.getenv("SMTP_USERNAME")
@@ -37,9 +43,6 @@ class Config:
     # Revision Queue
     REVISION_QUEUE_ENABLED = True
     REVISION_QUEUE_DELAY = float(os.getenv("REVISION_QUEUE_DELAY", 1.0))  # seconds
-
-    # PDF Generation
-    WEASYPRINT_ENABLED = True
 
     # Utility
     @staticmethod
