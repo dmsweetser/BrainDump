@@ -74,8 +74,6 @@ class StringModifier:
     @staticmethod
     def apply_modifications(content: str, changes: List[Dict[str, Any]], dry_run: bool = False) -> str:
         modified_content = content
-        incomplete_actions = []
-
         for change in changes:
             file = change['file']
             logging.info(f"Processing file: {file}")
@@ -85,12 +83,9 @@ class StringModifier:
                     if dry_run:
                         logging.info(f"Dry run: Would apply action {action['action']} to content")
                     else:
-                        if not StringModifier._apply_action(modified_content, action):
-                            incomplete_actions.append({'file': file, 'action': action})
+                        modified_content = StringModifier._apply_action(modified_content, action)
                 except Exception as e:
                     logging.error(f"Error applying modifications: {e}")
-                    incomplete_actions.append({'file': file, 'action': action})
-
         return modified_content
 
     @staticmethod
@@ -99,7 +94,7 @@ class StringModifier:
             action_type = action['action']
             if action_type == 'replace_section':
                 return StringModifier._replace_section(content, action['original_content'], action['file_content'])
-            return False
+            return content
         except Exception as e:
             logging.error(f"Error applying action: {e}")
             raise
@@ -111,20 +106,18 @@ class StringModifier:
             if original_content in content:
                 modified_content = content.replace(original_content, new_section_str)
                 logging.info("Replaced section in content")
-                return True
+                return modified_content
             else:
                 logging.warning("Original content not found in content")
-                return False
+                return content
         except Exception as e:
             logging.error(f"Error replacing section: {e}")
-            raise
+            return content
 
 
 class AIBuilder:
     def __init__(self):
         self.response_file = "current_response.txt"
-        self.output_file = "output.txt"
-        self.actions_file = "actions.txt"
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
@@ -232,9 +225,6 @@ Respond **only** in the required format. No commentary. No explanations. No mark
             changes = StringParser.parse_custom_format(response_content)
             modified_document = StringModifier.apply_modifications(current_document, changes, dry_run=False)
 
-            # Save the final output
-            with open(self.output_file, 'w', encoding='utf-8') as f:
-                f.write(modified_document)
 
             return modified_document
 
