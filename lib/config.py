@@ -13,7 +13,6 @@ class Config:
 
     # Database
     DATABASE = os.getenv("DATABASE", "brain_dump.db")
-    NOTE_DIR = os.getenv("NOTE_DIR", "notes")
     HTML_OUTPUT = os.getenv("HTML_OUTPUT", "output")
     PDF_OUTPUT = os.getenv("PDF_OUTPUT", "pdf")
     SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "system_prompt.txt")

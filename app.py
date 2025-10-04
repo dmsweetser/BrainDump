@@ -27,7 +27,7 @@ app.config['SECRET_KEY'] = Config.SECRET_KEY
 app.config['DEBUG'] = Config.DEBUG
 
 # Initialize directories
-for directory in [Config.NOTE_DIR, Config.HTML_OUTPUT, Config.PDF_OUTPUT]:
+for directory in [Config.HTML_OUTPUT, Config.PDF_OUTPUT]:
     Path(directory).mkdir(exist_ok=True)
 
 # Initialize database
