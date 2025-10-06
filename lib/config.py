@@ -14,7 +14,6 @@ class Config:
     # Database
     DATABASE = os.getenv("DATABASE", "brain_dump.db")
     HTML_OUTPUT = os.getenv("HTML_OUTPUT", "output")
-    SYSTEM_PROMPT_FILE = os.getenv("SYSTEM_PROMPT_FILE", "system_prompt.txt")
 
     # AI Model
     USE_LOCAL_MODEL = os.getenv("USE_LOCAL_MODEL", "False").lower() == "true"

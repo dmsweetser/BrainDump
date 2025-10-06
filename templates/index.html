@@ -320,29 +320,6 @@
             </div>
         </div>
 
-        <div class="row mt-4" id="system-prompt">
-            <div class="col-md-12">
-                <div class="card">
-                    <div class="card-header">
-                        <i class="bi bi-chat-dots me-2"></i> System Prompt
-                    </div>
-                    <div class="card-body">
-                        <form id="system-prompt-form">
-                            <div class="mb-3">
-                                <label for="system-prompt-text" class="form-label">System Prompt for AI
-                                    Organization</label>
-                                <textarea class="form-control" id="system-prompt-text" name="prompt"
-                                    rows="6">{{ system_prompt }}</textarea>
-                            </div>
-                            <button type="submit" class="btn btn-primary">
-                                <i class="bi bi-save me-2"></i> Save Prompt
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <div class="row mt-4" id="history">
             <div class="col-md-12">
                 <div class="card">
@@ -433,36 +410,6 @@
                 .catch(error => {
                     console.error('Error:', error);
                     alert('An error occurred while adding the note.');
-                });
-        });
-
-        // System prompt form submission
-        document.getElementById('system-prompt-form').addEventListener('submit', function (e) {
-            e.preventDefault();
-
-            const formData = new FormData(this);
-            const data = Object.fromEntries(formData);
-
-            fetch('/system_prompt', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                },
-                body: new URLSearchParams(data)
-            })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        alert('System prompt updated successfully!');
-                        // Refresh the page to show updated data
-                        location.reload();
-                    } else {
-                        alert('Error: ' + (data.error || 'Unknown error'));
-                    }
-                })
-                .catch(error => {
-                    console.error('Error:', error);
-                    alert('An error occurred while updating the system prompt.');
                 });
         });
 

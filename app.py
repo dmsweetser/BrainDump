@@ -52,51 +52,7 @@ def init_db():
             diff_with_previous TEXT
         )
     ''')
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS system_prompt (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            prompt TEXT NOT NULL
-        )
-    ''')
-    # Initialize system prompt
-    cursor.execute('SELECT COUNT(*) FROM system_prompt')
-    if cursor.fetchone()[0] == 0:
-        default_prompt = """
-You are a professional note organizer and knowledge architect. Your task is to take a collection of raw notes and organize them into a coherent, well-structured, and navigable document.
- 
-Guidelines:
-1. Create a comprehensive table of contents with appropriate headings and subheadings
-2. Group related notes together thematically
-3. Use clear and descriptive section titles
-4. Preserve all information from the original notes
-5. Create meaningful links between related sections
-6. Use markdown formatting for the final output
-7. Ensure the document is easy to navigate and understand
-8. Maintain the original meaning and intent of the notes
-9. Add any relevant context or connections between ideas
-10. Use clear and concise language
-"""
-        cursor.execute('INSERT INTO system_prompt (prompt) VALUES (?)', (default_prompt,))
-    conn.commit()
-    conn.close()
 
-# Get system prompt
-def get_system_prompt():
-    conn = sqlite3.connect(Config.DATABASE)
-    cursor = conn.cursor()
-    cursor.execute('SELECT prompt FROM system_prompt LIMIT 1')
-    result = cursor.fetchone()
-    conn.close()
-    return result[0] if result else ""
-
-# Save system prompt
-def save_system_prompt(prompt):
-    conn = sqlite3.connect(Config.DATABASE)
-    cursor = conn.cursor()
-    cursor.execute('DELETE FROM system_prompt')
-    cursor.execute('INSERT INTO system_prompt (prompt) VALUES (?)', (prompt,))
-    conn.commit()
-    conn.close()
 
 # Generate note hash
 def generate_note_hash(content):
@@ -292,8 +248,7 @@ def index():
     notes = get_all_notes()
     history = get_document_history()
     latest_version = history[0] if history else None
-    system_prompt = get_system_prompt()
-    return render_template('index.html', notes=notes, history=history, latest_version=latest_version, system_prompt=system_prompt)
+    return render_template('index.html', notes=notes, history=history, latest_version=latest_version)
 
 @app.route('/add_note', methods=['POST'])
 def add_note():
@@ -348,14 +303,6 @@ def edit_note(note_id):
     finally:
         conn.close()
 
-@app.route('/system_prompt', methods=['POST'])
-def update_system_prompt():
-    prompt = request.form.get('prompt', '').strip()
-    if not prompt:
-        return jsonify({'error': 'System prompt cannot be empty'}), 400
-    save_system_prompt(prompt)
-    return jsonify({'success': True, 'message': 'System prompt updated successfully'})
-
 @app.route('/export_html/<int:version_id>')
 def export_html(version_id):
     conn = sqlite3.connect(Config.DATABASE)
@@ -387,10 +334,6 @@ def api_notes():
 @app.route('/api/history')
 def api_history():
     return jsonify(get_document_history())
-
-@app.route('/api/system_prompt')
-def api_system_prompt():
-    return jsonify({'prompt': get_system_prompt()})
 
 if __name__ == '__main__':
     init_db()

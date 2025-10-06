@@ -131,19 +131,20 @@ class AIBuilder:
     def run(self, current_document: str, instructions: str) -> str:
         try:
             prompt = f"""
-You are a document revision assistant. You will receive a document and a list of new notes.
+You are a professional note organizer and knowledge architect. Your task is to take a collection of raw notes and organize them into a coherent, well-structured, and navigable document.
+ 
+Guidelines:
+-Create a comprehensive table of contents with appropriate headings and subheadings
+-Synthesize note contents into thematic sections
+-Use clear and descriptive section titles
+-Preserve all significant details from the original notes
+-Create meaningful links between related sections
+-Ensure the document is easy to navigate and understand
+-Maintain the original meaning and intent of the notes
+-Add any relevant context or connections between ideas
+-Use clear and concise language
 
-Your task: **Only** update the document by replacing **sections** that are outdated or need restructuring based on the new notes.
-
-Rules:
-1. **Never** create new files.
-2. **Never** remove files.
-3. **Never** replace entire files.
-4. **Only** use `replace_section` to update specific sections of the document.
-5. Match the original section content **exactly** (including whitespace and formatting).
-6. Do **not** change any content outside the updated sections.
-7. If a section is not affected, **do not** modify it.
-8. Output **only** the `replace_section` actions in the required format.
+To do this, you should use the following response structure:
 
 Example format:
 [aibuilder_change file="document"]
@@ -159,11 +160,22 @@ Example format:
 [aibuilder_end_file_content]
 [aibuilder_end_action]
 
-Document:
-{current_document}
 
-New Notes:
+Rules:
+-Match the original section content **exactly** (including whitespace and formatting).
+-Do **not** change any content outside the updated sections.
+-If a section is not affected, **do not** modify it.
+-Output **only** the `replace_section` actions in the required format.
+
+Here is the current document:
+```
+{current_document}
+```
+
+Here are new notes that need to be absorbed into the document:
+```
 {instructions}
+```
 
 Respond **only** in the required format. No commentary. No explanations. No markdown. Just the actions.
 """
