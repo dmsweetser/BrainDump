@@ -562,6 +562,79 @@ def export_all_notes():
     except Exception as e:
         logger.error(f"Error exporting all notes: {e}")
         return jsonify({'error': str(e)}), 500
+    
+@app.route('/regenerate_all')
+def regenerate_all():
+    try:
+        # Fetch all notes (excluding deleted ones)
+        notes = get_all_notes()
+        logger.info(f"Retrieved {len(notes)} notes for full regeneration")
+
+        # Sort notes by creation time (newest first)
+        notes.sort(key=lambda x: x['created_at'], reverse=True)
+
+        # Build the initial document content from notes
+        instructions = ""
+        for note in notes:
+            if note['is_deleted'] == 0:  # Only include non-deleted notes
+                instructions += f"=== Added: {note['created_at']} ===\n"
+                instructions += f"{note['content']}\n\n"
+
+        # Run Revisor to generate the full document
+        revisor = Revisor()
+        logger.info("Starting full document regeneration with Revisor")
+        html_content = revisor.run(current_document="", instructions=instructions)
+
+        # Save the new document version
+        conn = sqlite3.connect(Config.DATABASE)
+        cursor = conn.cursor()
+        cursor.execute('SELECT MAX(version_number) FROM document_history')
+        result = cursor.fetchone()
+        conn.close()
+        version_number = (result[0] or 0) + 1
+
+        timestamp = datetime.now()
+        file_timestamp = timestamp.strftime("%Y%m%d_%H%M%S")
+        html_filename = f"brain_dump_v{version_number}_{file_timestamp}.html"
+        html_path = os.path.join(Config.HTML_OUTPUT, html_filename)
+
+        try:
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(html_content)
+            logger.info(f"Saved new full document version {version_number} to {html_path}")
+        except Exception as e:
+            logger.error(f"Failed to save full document to {html_path}: {e}")
+            raise
+
+        # Save to history
+        conn = sqlite3.connect(Config.DATABASE)
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT INTO document_history (version_number, timestamp, html_content, diff_with_previous)
+                VALUES (?, ?, ?, ?)
+            ''', (version_number, timestamp, html_content, ""))
+            conn.commit()
+            logger.info(f"Saved full document history entry for version {version_number}")
+        except Exception as e:
+            conn.rollback()
+            logger.error(f"Failed to save full document history: {e}")
+            raise
+        finally:
+            conn.close()
+
+        # Send email notification
+        if Config.SMTP_ENABLED and Config.EMAIL_SENDER and Config.EMAIL_RECIPIENTS:
+            try:
+                send_email_notification(version_number, html_path)
+            except Exception as e:
+                logger.error(f"Failed to send email notification: {e}")
+
+        return jsonify({'success': True, 'message': f'Full document regenerated with version {version_number}'})
+    except Exception as e:
+        logger.error(f"Error regenerating document: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/notes')
 def api_notes():

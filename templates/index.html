@@ -241,6 +241,9 @@
                                 <i class="bi bi-code-slash me-2"></i> View Diff
                             </button>
                             {% endif %}
+                            <button class="btn btn-info" onclick="regenerateAll()">
+                                <i class="bi bi-recycle me-2"></i> Rebuild the Entire Document
+                            </button>
                         </div>
                         <div class="preview" id="preview">
                             {{ latest_version.html_content | safe }}
@@ -530,6 +533,25 @@
              `;
             document.getElementById('diffContent').textContent = diff;
             new bootstrap.Modal(document.getElementById('diffModal')).show();
+        }
+
+        // Export all notes
+        function regenerateAll() {
+            if (confirm('Are you sure you want fully rebuild the document from all notes?')) {
+                fetch('/regenerate_all')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        window.location.reload();
+                    } else {
+                        alert('Error: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('An error occurred while rebuilding the document.');
+                });
+            }
         }
     </script>
 </body>
