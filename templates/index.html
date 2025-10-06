@@ -273,14 +273,15 @@
                                     {% for note in notes %}
                                     <tr>
                                         <td class="note-content">{{ note.content }}</td>
-                                        <td class="metadata">{{ note.created_at }}</td>
+                                        <td class="metadata">
+                                            Added: {{ note.created_at }}<br>
+                                            Modified: {{ note.modified_at }}
+                                        </td>
                                         <td>
-                                            <button class="btn btn-sm btn-outline-primary me-1"
-                                                onclick="editNote({{ note.id }})">
+                                            <button class="btn btn-sm btn-outline-primary me-1" onclick="editNote({{ note.id }})">
                                                 <i class="bi bi-pencil"></i>
                                             </button>
-                                            <button class="btn btn-sm btn-outline-danger"
-                                                onclick="deleteNote({{ note.id }})">
+                                            <button class="btn btn-sm btn-outline-danger" onclick="deleteNote({{ note.id }})">
                                                 <i class="bi bi-trash"></i>
                                             </button>
                                         </td>

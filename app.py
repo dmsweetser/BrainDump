@@ -43,6 +43,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             content TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            modified_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            is_deleted INTEGER DEFAULT 0,
             hash TEXT UNIQUE NOT NULL
         )
     ''')
@@ -62,7 +64,6 @@ def init_db():
 def generate_note_hash(content):
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
-# Save note (no title)
 def save_note(content):
     if not content.strip():
         return None
@@ -71,12 +72,11 @@ def save_note(content):
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            INSERT INTO notes (content, hash)
-            VALUES (?, ?)
+            INSERT INTO notes (content, created_at, modified_at, is_deleted, hash)
+            VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, ?)
         ''', (content, note_hash))
         note_id = cursor.lastrowid
         conn.commit()
-        # Queue document regeneration
         revision_queue.put(note_id)
         return note_id
     except sqlite3.IntegrityError:
@@ -111,18 +111,25 @@ def get_new_notes_since_revision():
     latest_timestamp = get_latest_revision_timestamp()
     if not latest_timestamp:
         return get_all_notes()
+
     conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, content, created_at 
-        FROM notes 
-        WHERE created_at > ? 
-        ORDER BY created_at ASC
-    ''', (latest_timestamp,))
+        SELECT id, content, created_at, modified_at, is_deleted
+        FROM notes
+        WHERE created_at > ? OR modified_at > ?
+        ORDER BY modified_at ASC
+    ''', (latest_timestamp, latest_timestamp))
     new_notes = cursor.fetchall()
     conn.close()
+
     return [
-        {'id': note[0], 'content': note[1], 'created_at': note[2]}
+        {
+            'id': note[0],
+            'content': note[1],
+            'created_at': note[2],
+            'modified_at': note[3]
+        }
         for note in new_notes
     ]
 
@@ -201,28 +208,45 @@ def regenerate_document_worker():
             if note_id is None:
                 break
 
-            # Get only **new** notes since last revision
+            # Get all changes since last revision
             new_notes = get_new_notes_since_revision()
             if not new_notes:
                 revision_queue.task_done()
                 continue
 
-            # Get latest document HTML
+            # Fetch current document
             history = get_document_history()
             latest_html = history[0]['html_content'] if history else ""
 
-            # Prepare input for AI: just the raw content
-            new_notes_text = "\n".join([
-                f"New content block:\n{note['content']}"
-                for note in new_notes
-            ])
+            # Build instructions with change context
+            instructions = []
+            for note in new_notes:
+                if note['created_at'] == note['modified_at']:
+                    instructions.append(f"ADDED: New content block:\n{note['content']}")
+                elif int(note['is_deleted']) == 1:
+                    instructions.append(f"DELETED: Existing content block:\n{note['content']}")
+                else:
+                    # Fetch original content for edit
+                    conn = sqlite3.connect(Config.DATABASE)
+                    cursor = conn.cursor()
+                    cursor.execute('SELECT content FROM notes WHERE id = ?', (note['id'],))
+                    original = cursor.fetchone()
+                    conn.close()
+                    if original:
+                        instructions.append(
+                            f"CHANGED: Note ID {note['id']} modified from:\n{original[0]}\n\nTO:\n{note['content']}"
+                        )
+                    else:
+                        instructions.append(f"CHANGED: Note ID {note['id']} modified to:\n{note['content']}")
 
-            # Initialize AI Builder
+            # Join instructions
+            instructions_text = "\n\n".join(instructions)
+
+            # Run Revisor
             revisor = Revisor()
+            html_content = revisor.run(current_document=latest_html, instructions=instructions_text)
 
-            # Run AI to get `replace_section` actions
-            html_content = revisor.run(current_document=latest_html, instructions=new_notes_text)
-
+            # Save version
             conn = sqlite3.connect(Config.DATABASE)
             cursor = conn.cursor()
             cursor.execute('SELECT MAX(version_number) FROM document_history')
@@ -238,13 +262,13 @@ def regenerate_document_worker():
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
 
-            # Calculate diff with previous version
+            # Generate diff
             diff_with_previous = ""
             if history:
                 previous_html = history[0]['html_content']
                 diff_with_previous = generate_diff(previous_html, html_content)
 
-            # Save the new version to document_history table
+            # Save to history
             conn = sqlite3.connect(Config.DATABASE)
             cursor = conn.cursor()
             cursor.execute('''
@@ -254,7 +278,7 @@ def regenerate_document_worker():
             conn.commit()
             conn.close()
 
-            # Email new version
+            # Send email
             if Config.SMTP_ENABLED and Config.EMAIL_SENDER and Config.EMAIL_RECIPIENTS:
                 send_email_notification(version_number, html_path)
 
@@ -319,15 +343,22 @@ def delete_note(note_id):
     conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     try:
-        cursor.execute('SELECT content FROM notes WHERE id = ?', (note_id,))
-        if not cursor.fetchone():
+
+        # Update the note
+        cursor.execute('''
+            UPDATE notes 
+            SET is_deleted = 1, modified_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        ''', (note_id))
+        if cursor.rowcount == 0:
             return jsonify({'error': 'Note not found'}), 404
-        cursor.execute('DELETE FROM notes WHERE id = ?', (note_id,))
-        if cursor.rowcount > 0:
-            revision_queue.put(note_id)
-            conn.commit()
-            return jsonify({'success': True, 'message': 'Note deleted successfully'})
-        return jsonify({'error': 'Note not found'}), 404
+
+        # Send revision with context
+        revision_queue.put(note_id)
+
+        conn.commit()
+        return jsonify({'success': True, 'message': 'Note deleted successfully'})
+
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -339,16 +370,32 @@ def edit_note(note_id):
     content = request.form.get('content', '').strip()
     if not content:
         return jsonify({'error': 'Content is required'}), 400
+
     conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     try:
-        cursor.execute('SELECT id FROM notes WHERE id = ?', (note_id,))
-        if not cursor.fetchone():
+        # Fetch original content
+        cursor.execute('SELECT content FROM notes WHERE id = ?', (note_id,))
+        original_result = cursor.fetchone()
+        if not original_result:
             return jsonify({'error': 'Note not found'}), 404
-        cursor.execute('UPDATE notes SET content = ? WHERE id = ?', (content, note_id))
+        original_content = original_result[0]
+
+        # Update the note
+        cursor.execute('''
+            UPDATE notes 
+            SET content = ?, modified_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        ''', (content, note_id))
+        if cursor.rowcount == 0:
+            return jsonify({'error': 'Note not found'}), 404
+
+        # Send revision with context
         revision_queue.put(note_id)
+
         conn.commit()
         return jsonify({'success': True, 'message': 'Note updated successfully'})
+
     except Exception as e:
         conn.rollback()
         return jsonify({'error': str(e)}), 500
@@ -389,7 +436,8 @@ def api_history():
 def open_browser():
     webbrowser.open_new("http://127.0.0.1:5983")
 
+init_db()
+threading.Timer(10, open_browser).start()
+
 if __name__ == '__main__':
-    init_db()
-    threading.Timer(5, open_browser).start()
     app.run(host="0.0.0.0", port="5983", debug=Config.DEBUG)
