@@ -102,15 +102,23 @@ class StringModifier:
     @staticmethod
     def _replace_section(content: str, original_content: str, new_content: List[str]) -> bool:
         try:
-            new_section_str = '\n'.join(new_content)
-            if original_content in content:
-                modified_content = content.replace(original_content, new_section_str)
-                logging.info("Replaced section in content")
+            # Strip whitespace from each line of original_content and new_content
+            original_lines = [line.strip() for line in original_content.split('\n')]
+            new_lines = [line.strip() for line in new_content]
+
+            # Reconstruct the cleaned content
+            cleaned_original_content = '\n'.join(original_lines)
+            cleaned_new_content = '\n'.join(new_lines)
+
+            # Use cleaned content for matching
+            if cleaned_original_content in content:
+                modified_content = content.replace(cleaned_original_content, cleaned_new_content)
+                logging.info("Replaced section in content with cleaned lines")
                 return modified_content
             elif content == '':
-                return new_section_str
+                return cleaned_new_content
             else:
-                logging.warning("Original content not found in content")
+                logging.warning("Original content not found in content (after cleaning)")
                 return content
         except Exception as e:
             logging.error(f"Error replacing section: {e}")
