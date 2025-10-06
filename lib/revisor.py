@@ -139,51 +139,47 @@ class Revisor:
     def run(self, current_document: str, instructions: str) -> str:
         try:
             prompt = f"""
-You are a professional knowledge architect and content synthesizer. Your task is to **integrate new content** into an existing document while **preserving structure, improving clarity, and removing redundancy**.
+You are a professional note organizer and knowledge architect. Your task is to take a collection of raw notes and organize them into a coherent, well-structured, and navigable document.
+ 
+Guidelines:
+-Create a comprehensive table of contents with appropriate headings and subheadings
+-Synthesize similar or related notes into unified, coherent sections
+-Deduplicate redundant or overlapping content
+-Clean up formatting (e.g., remove extra whitespace, fix inconsistent headings, standardize bullet points).
+-Reorganize content logically (e.g., group by topic, create subheadings).
+-Use clear and descriptive section titles
+-Create meaningful links between related sections
+-Ensure the document is easy to navigate and understand
+-Add any relevant context or connections between ideas
+-Use clear and concise language
 
-### 🎯 Core Objectives:
-- **Synthesize** similar or related notes into unified, coherent sections.
-- **Deduplicate** redundant or overlapping content.
-- **Preserve all code blocks** exactly (do not reformat, reindent, or alter inside ````).
-- **Clean up formatting** (e.g., remove extra whitespace, fix inconsistent headings, standardize bullet points).
-- **Reorganize** content logically (e.g., group by topic, create subheadings).
-- **Maintain full context and meaning** of all original content.
-- **Add internal links** where relevant (e.g., `#section-name`).
-- **Use markdown-style headers** (`#`, `##`, `###`) for structure.
-- **Never delete content** unless it’s clearly redundant.
+To do this, you should use the following response structure:
 
-### 📌 Instructions:
-- Analyze the following changes:
-```
-{instructions}
-```
-
-- Respond **only** with `replace_section` actions in the required format.
-- Match the **exact original section content** (including whitespace and formatting).
-- Do **not** modify content outside updated sections.
-- If no changes are needed, return an empty response.
-
-### 📄 Example Response:
+Example format:
 [revisor_change file="document"]
 [revisor_action type="replace_section"]
 [revisor_original_content]
-<h2>Getting Started</h2>
-<p>Install Python and run pip install.</p>
+<h2>Introduction</h2>
+<p>This is the original intro.</p>
 [revisor_end_original_content]
 [revisor_file_content]
-<h2>Getting Started</h2>
-<p>Install Python 3.10+ and run <code>pip install -r requirements.txt</code>.</p>
-<a href="#advanced">Advanced Setup</a>
+<h2>Introduction</h2>
+<p>This is the updated intro with new context.</p>
+<a href="#new-section">Go to new section</a>
 [revisor_end_file_content]
 [revisor_end_action]
-
 
 Here is the current document:
 ```
 {current_document}
 ```
 
-Respond **only** in the required format. No explanations. No markdown. No extra text.
+Here are new notes that need to be absorbed into the document:
+```
+{instructions}
+```
+
+Respond **only** in the required format. No commentary. No explanations. No markdown. Just the actions.
 """
 
             use_local_model = Config.USE_LOCAL_MODEL
