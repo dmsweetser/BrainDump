@@ -1,7 +1,9 @@
+from html import unescape
 import os
 import hashlib
 import json
 from datetime import datetime, timedelta
+import re
 import threading
 import queue
 import time
@@ -16,6 +18,7 @@ import sqlite3
 import webbrowser
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
+import html2text
 
 from lib.config import Config
 from lib.revisor import Revisor
@@ -82,7 +85,7 @@ def save_note(content):
     finally:
         conn.close()
 
-# Get all notes (no title)
+# Get all notes
 def get_all_notes():
     conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
@@ -122,6 +125,39 @@ def get_new_notes_since_revision():
         {'id': note[0], 'content': note[1], 'created_at': note[2]}
         for note in new_notes
     ]
+
+def sanitize_diff_content(html_content):
+    """
+    Convert HTML content to plain text while preserving structure
+    """
+    if not html_content or not isinstance(html_content, str):
+        return ""
+    
+    # First, handle any HTML entities
+    html_content = unescape(html_content)
+    
+    # Create html2text converter
+    h = html2text.HTML2Text()
+    
+    # Configure the converter
+    h.body_width = 0  # Don't wrap lines
+    h.ignore_links = False  # Keep links as text
+    h.ignore_images = True  # Don't include image alt text
+    h.ignore_emphasis = False  # Preserve bold/italic
+    h.ignore_tables = False  # Keep table structure
+    h.single_line_break = True  # Use single line breaks
+    h.body_width = 1000  # Prevent line wrapping
+    h.escape_snob = True  # Escape special characters
+    
+    # Convert HTML to plain text
+    plain_text = h.handle(html_content)
+    
+    # Clean up extra whitespace
+    plain_text = re.sub(r'\n\s*\n', '\n\n', plain_text)  # Remove extra blank lines
+    plain_text = re.sub(r'\n{3,}', '\n\n', plain_text)  # Limit consecutive blank lines
+    plain_text = plain_text.strip()
+    
+    return plain_text
 
 # Get document history
 def get_document_history():

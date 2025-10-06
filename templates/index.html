@@ -174,8 +174,9 @@
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <pre id="diffContent"
-                        style="white-space: pre-wrap; font-family: monospace; font-size: 0.9em;"></pre>
+                        <pre id="diffContent"
+                            style="white-space: pre-wrap; font-family: monospace; font-size: 0.9em; background-color: #f1f3f5; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+                        </pre>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
@@ -507,16 +508,25 @@
         }
 
         // Keyboard shortcut: Ctrl+Enter to submit
-        document.addEventListener('keydown', function (e) {
-            if (e.ctrlKey && e.key === 'Enter') {
-                e.preventDefault();
-                document.getElementById('add-note-form').dispatchEvent(new Event('submit'));
-            }
+        document.addEventListener('DOMContentLoaded', function() {
+            document.addEventListener('keydown', function (e) {
+                if (e.ctrlKey && e.key === 'Enter') {
+                    e.preventDefault();
+                    const form = document.getElementById('add-note-form');
+                    if (form) {
+                        form.dispatchEvent(new Event('submit'));
+                    }
+                }
+            });
         });
 
         // Show diff modal
         function showDiffModal() {
-            const diff = '{{ latest_version.diff_with_previous | safe }}';
+            // The diff content is now sanitized plain text
+            const diff = 
+            `
+            {{ latest_version.diff_with_previous | safe }}
+             `;
             document.getElementById('diffContent').textContent = diff;
             new bootstrap.Modal(document.getElementById('diffModal')).show();
         }

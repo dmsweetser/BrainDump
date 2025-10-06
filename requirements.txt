@@ -3,3 +3,4 @@ weasyprint
 llama-cpp-python
 azure-ai-inference
 python-dotenv
+html2text
