@@ -191,8 +191,9 @@ def regenerate_document_worker():
             conn.close()
             version_number = (result[0] or 0) + 1
 
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            html_filename = f"brain_dump_v{version_number}_{timestamp}.html"
+            timestamp = datetime.now()
+            file_timestamp = timestamp.strftime("%Y%m%d_%H%M%S")
+            html_filename = f"brain_dump_v{version_number}_{file_timestamp}.html"
             html_path = os.path.join(Config.HTML_OUTPUT, html_filename)
 
             with open(html_path, 'w', encoding='utf-8') as f:

@@ -11,8 +11,8 @@ class StringParser:
     @staticmethod
     def parse_custom_format(content: str) -> List[Dict[str, Any]]:
         try:
-            if "<tool_call>" in content:
-                content = content.split("<tool_call>")[1]
+            if "</think>" in content:
+                content = content.split("</think>")[1]
             content = re.sub(r'^.*?\[revisor_change', '[revisor_change', content, flags=re.DOTALL)
             changes = []
             change_blocks = re.finditer(
