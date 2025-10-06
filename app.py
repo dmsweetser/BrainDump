@@ -133,7 +133,7 @@ def get_document_history():
             'version_number': item[1],
             'timestamp': item[2],
             'html_content': item[3],
-            'diff_with_previous': item[5]
+            'diff_with_previous': item[4]
         }
         for item in history
     ]
