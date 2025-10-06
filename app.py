@@ -184,7 +184,6 @@ def regenerate_document_worker():
             # Run AI to get `replace_section` actions
             html_content = revisor.run(current_document=latest_html, instructions=new_notes_text)
 
-            # Save to DB
             conn = sqlite3.connect(Config.DATABASE)
             cursor = conn.cursor()
             cursor.execute('SELECT MAX(version_number) FROM document_history')
@@ -192,13 +191,29 @@ def regenerate_document_worker():
             conn.close()
             version_number = (result[0] or 0) + 1
 
-            # Save to DB
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             html_filename = f"brain_dump_v{version_number}_{timestamp}.html"
             html_path = os.path.join(Config.HTML_OUTPUT, html_filename)
 
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(html_content)
+
+            # Calculate diff with previous version
+            diff_with_previous = ""
+            if history:
+                # Get the previous version's HTML content
+                previous_html = history[0]['html_content']
+                diff_with_previous = generate_diff(previous_html, html_content)
+
+            # Save the new version to document_history table
+            conn = sqlite3.connect(Config.DATABASE)
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO document_history (version_number, timestamp, html_content, diff_with_previous)
+                VALUES (?, ?, ?, ?)
+            ''', (version_number, timestamp, html_content, diff_with_previous))
+            conn.commit()
+            conn.close()
 
             # Email new version
             if Config.SMTP_ENABLED and Config.EMAIL_SENDER and Config.EMAIL_RECIPIENTS:
