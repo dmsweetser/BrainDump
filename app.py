@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
 
 from lib.config import Config
-from lib.ai_builder import AIBuilder
+from lib.revisor import Revisor
 
 load_dotenv()
 
@@ -179,10 +179,10 @@ def regenerate_document_worker():
             ])
 
             # Initialize AI Builder
-            ai_builder = AIBuilder()
+            revisor = Revisor()
 
             # Run AI to get `replace_section` actions
-            html_content = ai_builder.run(current_document=latest_html, instructions=new_notes_text)
+            html_content = revisor.run(current_document=latest_html, instructions=new_notes_text)
 
             # Save to DB
             conn = sqlite3.connect(Config.DATABASE)

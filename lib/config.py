@@ -45,19 +45,3 @@ class Config:
     @staticmethod
     def get_root_directory() -> Path:
         return Path(__file__).parent.resolve()
-
-    @staticmethod
-    def get_ai_builder_dir(root_dir: Path) -> Path:
-        return root_dir / "ai_builder"
-
-    @staticmethod
-    def get_log_file_path(root_dir: Path) -> str:
-        return str(root_dir / "ai_builder" / "brain_dump.log")
-
-    @staticmethod
-    def generate_output_only() -> bool:
-        return os.getenv("GENERATE_OUTPUT_ONLY", "False").lower() == "true"
-
-    @staticmethod
-    def generate_but_do_not_apply() -> bool:
-        return os.getenv("GENERATE_BUT_DO_NOT_APPLY", "False").lower() == "true"

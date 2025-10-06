@@ -13,10 +13,10 @@ class StringParser:
         try:
             if "<tool_call>" in content:
                 content = content.split("<tool_call>")[1]
-            content = re.sub(r'^.*?\[aibuilder_change', '[aibuilder_change', content, flags=re.DOTALL)
+            content = re.sub(r'^.*?\[revisor_change', '[revisor_change', content, flags=re.DOTALL)
             changes = []
             change_blocks = re.finditer(
-                r'\[aibuilder_change\s+file\s*=\s*"([^"]+)"\](.*?)(?=\[aibuilder_change|$)',
+                r'\[revisor_change\s+file\s*=\s*"([^"]+)"\](.*?)(?=\[revisor_change|$)',
                 content,
                 re.DOTALL
             )
@@ -34,7 +34,7 @@ class StringParser:
         try:
             actions = []
             action_blocks = re.finditer(
-                r'\[aibuilder_action\s+type\s*=\s*"([^"]+)"\](.*?)\[aibuilder_end_action\]',
+                r'\[revisor_action\s+type\s*=\s*"([^"]+)"\](.*?)\[revisor_end_action\]',
                 content,
                 re.DOTALL
             )
@@ -54,8 +54,8 @@ class StringParser:
     @staticmethod
     def _parse_replace_section_action(content: str) -> Optional[Dict[str, Any]]:
         try:
-            original_content_pattern = r'\[aibuilder_original_content\](.*?)\[aibuilder_end_original_content\]'
-            file_content_pattern = r'\[aibuilder_file_content\](.*?)\[aibuilder_end_file_content\]'
+            original_content_pattern = r'\[revisor_original_content\](.*?)\[revisor_end_original_content\]'
+            file_content_pattern = r'\[revisor_file_content\](.*?)\[revisor_end_file_content\]'
             original_content_match = re.search(original_content_pattern, content, re.DOTALL)
             file_content_match = re.search(file_content_pattern, content, re.DOTALL)
             if original_content_match and file_content_match:
@@ -117,7 +117,7 @@ class StringModifier:
             return content
 
 
-class AIBuilder:
+class Revisor:
     def __init__(self):
         self.response_file = "current_response.txt"
         logging.basicConfig(
@@ -147,18 +147,18 @@ Guidelines:
 To do this, you should use the following response structure:
 
 Example format:
-[aibuilder_change file="document"]
-[aibuilder_action type="replace_section"]
-[aibuilder_original_content]
+[revisor_change file="document"]
+[revisor_action type="replace_section"]
+[revisor_original_content]
 <h2>Introduction</h2>
 <p>This is the original intro.</p>
-[aibuilder_end_original_content]
-[aibuilder_file_content]
+[revisor_end_original_content]
+[revisor_file_content]
 <h2>Introduction</h2>
 <p>This is the updated intro with new context.</p>
 <a href="#new-section">Go to new section</a>
-[aibuilder_end_file_content]
-[aibuilder_end_action]
+[revisor_end_file_content]
+[revisor_end_action]
 
 
 Rules:
