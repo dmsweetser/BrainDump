@@ -13,6 +13,7 @@ from email import encoders
 from pathlib import Path
 
 import sqlite3
+import webbrowser
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify, send_file, redirect, url_for
 
@@ -37,7 +38,6 @@ def init_db():
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS notes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
             content TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             hash TEXT UNIQUE NOT NULL
@@ -52,22 +52,25 @@ def init_db():
             diff_with_previous TEXT
         )
     ''')
-
+    conn.commit()
+    conn.close()
 
 # Generate note hash
 def generate_note_hash(content):
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
-# Save note
-def save_note(title, content):
+# Save note (no title)
+def save_note(content):
+    if not content.strip():
+        return None
     note_hash = generate_note_hash(content)
     conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     try:
         cursor.execute('''
-            INSERT INTO notes (title, content, hash)
-            VALUES (?, ?, ?)
-        ''', (title, content, note_hash))
+            INSERT INTO notes (content, hash)
+            VALUES (?, ?)
+        ''', (content, note_hash))
         note_id = cursor.lastrowid
         conn.commit()
         # Queue document regeneration
@@ -79,15 +82,15 @@ def save_note(title, content):
     finally:
         conn.close()
 
-# Get all notes
+# Get all notes (no title)
 def get_all_notes():
     conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
-    cursor.execute('SELECT id, title, content, created_at FROM notes ORDER BY created_at DESC')
+    cursor.execute('SELECT id, content, created_at FROM notes ORDER BY created_at DESC')
     notes = cursor.fetchall()
     conn.close()
     return [
-        {'id': note[0], 'title': note[1], 'content': note[2], 'created_at': note[3]}
+        {'id': note[0], 'content': note[1], 'created_at': note[2]}
         for note in notes
     ]
 
@@ -108,7 +111,7 @@ def get_new_notes_since_revision():
     conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT id, title, content, created_at 
+        SELECT id, content, created_at 
         FROM notes 
         WHERE created_at > ? 
         ORDER BY created_at ASC
@@ -116,7 +119,7 @@ def get_new_notes_since_revision():
     new_notes = cursor.fetchall()
     conn.close()
     return [
-        {'id': note[0], 'title': note[1], 'content': note[2], 'created_at': note[3]}
+        {'id': note[0], 'content': note[1], 'created_at': note[2]}
         for note in new_notes
     ]
 
@@ -172,9 +175,9 @@ def regenerate_document_worker():
             history = get_document_history()
             latest_html = history[0]['html_content'] if history else ""
 
-            # Prepare input for AI
+            # Prepare input for AI: just the raw content
             new_notes_text = "\n".join([
-                f"=== {note['title']} ===\n{note['content']}"
+                f"New content block:\n{note['content']}"
                 for note in new_notes
             ])
 
@@ -202,7 +205,6 @@ def regenerate_document_worker():
             # Calculate diff with previous version
             diff_with_previous = ""
             if history:
-                # Get the previous version's HTML content
                 previous_html = history[0]['html_content']
                 diff_with_previous = generate_diff(previous_html, html_content)
 
@@ -238,7 +240,7 @@ def send_email_notification(version: int, html_path: str):
         body = f"New document version {version} has been generated."
         msg.attach(MIMEText(body, 'plain'))
 
-        # Attach HTML (optional)
+        # Attach HTML
         with open(html_path, "r", encoding="utf-8") as f:
             html_body = f.read()
         html_part = MIMEText(html_body, 'html')
@@ -257,8 +259,8 @@ def send_email_notification(version: int, html_path: str):
 revision_queue = queue.Queue()
 threading.Thread(target=regenerate_document_worker, daemon=True).start()
 
+# Routes
 
-# Routes (unchanged, but now use updated functions)
 @app.route('/')
 def index():
     notes = get_all_notes()
@@ -268,13 +270,12 @@ def index():
 
 @app.route('/add_note', methods=['POST'])
 def add_note():
-    title = request.form.get('title', '').strip()
     content = request.form.get('content', '').strip()
-    if not title or not content:
-        return jsonify({'error': 'Title and content are required'}), 400
-    note_id = save_note(title, content)
+    if not content:
+        return jsonify({'error': 'Content is required'}), 400
+    note_id = save_note(content)
     if note_id is None:
-        return jsonify({'error': 'Note with this content already exists'}), 400
+        return jsonify({'error': 'Duplicate content detected'}), 400
     return jsonify({'success': True, 'message': 'Note added successfully', 'note_id': note_id})
 
 @app.route('/delete_note/<int:note_id>', methods=['POST'])
@@ -299,17 +300,16 @@ def delete_note(note_id):
 
 @app.route('/edit_note/<int:note_id>', methods=['POST'])
 def edit_note(note_id):
-    title = request.form.get('title', '').strip()
     content = request.form.get('content', '').strip()
-    if not title or not content:
-        return jsonify({'error': 'Title and content are required'}), 400
+    if not content:
+        return jsonify({'error': 'Content is required'}), 400
     conn = sqlite3.connect(Config.DATABASE)
     cursor = conn.cursor()
     try:
         cursor.execute('SELECT id FROM notes WHERE id = ?', (note_id,))
         if not cursor.fetchone():
             return jsonify({'error': 'Note not found'}), 404
-        cursor.execute('UPDATE notes SET title = ?, content = ? WHERE id = ?', (title, content, note_id))
+        cursor.execute('UPDATE notes SET content = ? WHERE id = ?', (content, note_id))
         revision_queue.put(note_id)
         conn.commit()
         return jsonify({'success': True, 'message': 'Note updated successfully'})
@@ -337,8 +337,7 @@ def export_all_notes():
     notes = get_all_notes()
     content = ""
     for note in notes:
-        content += f"=== {note['title']} ===\n"
-        content += f"Added: {note['created_at']}\n"
+        content += f"=== Added: {note['created_at']} ===\n"
         content += f"{note['content']}\n\n"
     filename = f"all_notes_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
     return jsonify({'success': True, 'filename': filename, 'content': content})
@@ -351,6 +350,10 @@ def api_notes():
 def api_history():
     return jsonify(get_document_history())
 
+def open_browser():
+    webbrowser.open_new("http://127.0.0.1:5983")
+
 if __name__ == '__main__':
     init_db()
+    threading.Timer(5, open_browser).start()
     app.run(host="0.0.0.0", port="5983", debug=Config.DEBUG)
